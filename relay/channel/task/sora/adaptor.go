@@ -304,7 +304,9 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed":
 		taskResult.Status = model.TaskStatusSuccess
-		// Url intentionally left empty — the caller constructs the proxy URL using the public task ID
+		// 优先从上游返回中递归提取真实视频直链（兼容各中转把 .mp4 链接嵌在深层字段的情况）。
+		// 提取不到才留空，由 caller 回退到 OpenAI 原生 /content 代理端点（真 OpenAI 行为不变）。
+		taskResult.Url = extractVideoURLFromBody(respBody)
 	case "failed", "cancelled":
 		taskResult.Status = model.TaskStatusFailure
 		if resTask.Error != nil {
