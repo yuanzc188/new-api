@@ -63,6 +63,7 @@ var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
 // 保留旧变量以兼容历史逻辑，实际展示由 general_setting.quota_display_type 控制
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
+var TokenKeyMaskEnabled = true // 令牌密钥掩码：开启时列表/详情接口返回打码后的 key，关闭后返回完整 key
 var DrawingEnabled = true
 var TaskEnabled = true
 var DataExportEnabled = true

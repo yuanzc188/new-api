@@ -142,6 +142,28 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 // 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
 // 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
 // 控制器负责 defer Refund 和成功后 Settle。
+// applyTaskParamOverride 对异步任务（视频等）的请求体应用渠道参数覆盖。
+// 仅处理 application/json 请求体；multipart/form-data 等非 JSON 场景直接透传，
+// 保持与各 task adaptor BuildRequestBody 的原有行为一致。
+func applyTaskParamOverride(c *gin.Context, info *relaycommon.RelayInfo, body io.Reader) (io.Reader, error) {
+	if len(info.ParamOverride) == 0 {
+		return body, nil
+	}
+	contentType := c.Request.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "application/json") {
+		return body, nil
+	}
+	jsonData, err := io.ReadAll(body)
+	if err != nil {
+		return nil, err
+	}
+	overridden, err := relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(overridden), nil
+}
+
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
 
@@ -217,6 +239,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
+	}
+
+	// 8.5 应用渠道参数覆盖（与同步链路对齐；仅 JSON 请求体生效，multipart 等透传跳过）
+	requestBody, err = applyTaskParamOverride(c, info, requestBody)
+	if err != nil {
+		return nil, service.TaskErrorWrapper(err, "param_override_failed", http.StatusInternalServerError)
 	}
 
 	// 9. 发送请求

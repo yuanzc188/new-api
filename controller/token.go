@@ -19,7 +19,11 @@ func buildMaskedTokenResponse(token *model.Token) *model.Token {
 		return nil
 	}
 	maskedToken := *token
-	maskedToken.Key = token.GetMaskedKey()
+	if common.TokenKeyMaskEnabled {
+		maskedToken.Key = token.GetMaskedKey()
+	} else {
+		maskedToken.Key = token.GetFullKey()
+	}
 	return &maskedToken
 }
 

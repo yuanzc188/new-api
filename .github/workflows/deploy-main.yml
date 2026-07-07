@@ -1,0 +1,81 @@
+name: Build & Push (main → my Docker Hub)
+
+# 二开自维护：推送到 main 时自动构建 amd64 镜像并推到你自己的 Docker Hub。
+# 需要在 仓库 Settings → Secrets and variables → Actions 配置两个 secret：
+#   DOCKERHUB_USERNAME  你的 Docker Hub 用户名（同时作为镜像命名空间）
+#   DOCKERHUB_TOKEN     Docker Hub Access Token（Account Settings → Security）
+# 服务器更新：docker pull <DOCKERHUB_USERNAME>/new-api:latest
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'NOTICE'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & push (amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Guard - require Docker Hub secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::请先在仓库 Settings → Secrets → Actions 配置 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN"
+            exit 1
+          fi
+
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve tags & write VERSION
+        id: version
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="main-$(date +'%Y%m%d')-${SHORT_SHA}"
+          echo "${VERSION}" > VERSION
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/new-api:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/new-api:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### 镜像已推送" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ secrets.DOCKERHUB_USERNAME }}/new-api:latest" >> $GITHUB_STEP_SUMMARY
+          echo "${{ secrets.DOCKERHUB_USERNAME }}/new-api:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "服务器更新: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/new-api:latest" >> $GITHUB_STEP_SUMMARY
