@@ -396,6 +396,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			}
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "whisper-1")
 			relayMode = relayconstant.RelayModeAudioTranscription
+		} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/voices") {
+			// 声音克隆是 multipart 请求，模型名只能从表单里取
+			if req, err := getModelFromRequest(c); err == nil && req.Model != "" {
+				modelRequest.Model = req.Model
+			}
+			relayMode = relayconstant.RelayModeAudioVoiceClone
 		}
 		c.Set("relay_mode", relayMode)
 	}

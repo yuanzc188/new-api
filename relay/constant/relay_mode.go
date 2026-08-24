@@ -54,6 +54,8 @@ const (
 	RelayModeResponsesCompact
 
 	RelayModeAlphaSearch
+
+	RelayModeAudioVoiceClone // fish.audio 声音克隆（创建音色模型）
 )
 
 func Path2RelayMode(path string) int {
@@ -86,6 +88,8 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeAudioTranscription
 	} else if strings.HasPrefix(path, "/v1/audio/translations") {
 		relayMode = RelayModeAudioTranslation
+	} else if strings.HasPrefix(path, "/v1/audio/voices") {
+		relayMode = RelayModeAudioVoiceClone
 	} else if strings.HasPrefix(path, "/v1/rerank") {
 		relayMode = RelayModeRerank
 	} else if strings.HasPrefix(path, "/v1/realtime") {
