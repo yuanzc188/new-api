@@ -129,10 +129,12 @@
 
 **上限保护**：上游返回的时长是外部输入，钳制到 `relaycommon.MaxTaskDurationSeconds`（3600）后才作为计费乘数，符合 AGENTS.md 的计费安全不变量。
 
+**顺带修的 bug**：`responseTask.Seconds` 原本声明为 `string`，上游若把 `seconds` 返回成**数字**（自建数字人常见），`DoResponse` 和 `ParseTaskResult` 的 unmarshal 会直接报错——提交返回 500，或任务永远停在进行中、既不出结果也不结算。该字段仅用于把上游响应原样回写给客户端（代码里没有任何地方读它），已改为 `json.RawMessage`，字符串和数字两种形式都兼容。
+
 **注意**：
 - 预扣从 4 秒变 60 秒后，单次请求预扣额度变为原来的 15 倍（如 $2 → $30），**余额不足的用户会在提交阶段就被拒**。若要调小，改 `defaultEstimateSeconds` 一个常量即可。
 - 只对更新后新产生的任务生效，历史任务不回补。
-- 上游必须在完成时返回顶层 `seconds` 字段；嵌套字段（如 `data.seconds`）目前不解析。
+- 上游必须在完成时返回顶层 `seconds` 字段；嵌套字段（如 `metadata.seconds`）目前不解析。
 
 **合并注意**：`service/task_polling.go` 的 `settleTaskBillingOnComplete` 是官方文件，合并后务必确认 adaptor 调整仍在 `PerCallBilling` 早退**之前**。
 
