@@ -1142,13 +1142,17 @@ func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.Task
 // PerCallBilling tests — settleTaskBillingOnComplete
 // ===========================================================================
 
-func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
+// 按次计费仍然要接受 adaptor 给出的实际额度：例如数字人视频提交时无法得知
+// 真实时长，必须按上游完成时返回的时长做差额结算（此处为退款 3000）。
+func TestSettle_PerCallBilling_HonorsAdaptorAdjust(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
 
 	const userID, tokenID, channelID = 30, 30, 30
 	const initQuota, preConsumed = 10000, 5000
 	const tokenRemain = 8000
+	const actualQuota = 2000
+	const refund = preConsumed - actualQuota
 
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-percall-adaptor", tokenRemain)
@@ -1157,16 +1161,15 @@ func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.PrivateData.BillingContext.PerCallBilling = true
 
-	adaptor := &mockAdaptor{adjustReturn: 2000}
+	adaptor := &mockAdaptor{adjustReturn: actualQuota}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
 
 	settleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 
-	// Per-call: no adjustment despite adaptor returning 2000
-	assert.Equal(t, initQuota, getUserQuota(t, userID))
-	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, preConsumed, task.Quota)
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.Equal(t, initQuota+refund, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+refund, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, task.Quota)
+	assert.Equal(t, int64(1), countLogs(t))
 }
 
 func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {

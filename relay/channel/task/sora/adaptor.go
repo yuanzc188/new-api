@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -56,6 +57,12 @@ type responseTask struct {
 		Code    string `json:"code"`
 	} `json:"error,omitempty"`
 }
+
+// defaultEstimateSeconds 是请求未携带时长参数时的预扣秒数。
+// 数字人（音频驱动）类模型的真实时长由音频长度决定，提交时无法得知，
+// 因此按此值预扣，任务完成后由 AdjustBillingOnComplete 按上游返回的
+// seconds 做差额结算（多退少补）。
+const defaultEstimateSeconds = 60
 
 // ============================
 // Adaptor implementation
@@ -111,7 +118,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 		seconds = req.Duration
 	}
 	if seconds <= 0 {
-		seconds = 4
+		seconds = defaultEstimateSeconds
 	}
 
 	size := req.Size
@@ -321,6 +328,32 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	}
 
 	return &taskResult, nil
+}
+
+// AdjustBillingOnComplete 按上游返回的实际时长重算额度，触发差额结算（多退少补）。
+// 返回 0 表示无法判定实际时长，保持预扣额度不变。
+func (a *TaskAdaptor) AdjustBillingOnComplete(task *model.Task, _ *relaycommon.TaskInfo) int {
+	if task == nil || task.Quota <= 0 || task.PrivateData.BillingContext == nil {
+		return 0
+	}
+	estimated := task.PrivateData.BillingContext.OtherRatios["seconds"]
+	if estimated <= 0 {
+		return 0
+	}
+	// gjson 兼容上游把 seconds 返回成字符串或数字两种形式
+	actual := gjson.GetBytes(task.Data, "seconds").Float()
+	if actual <= 0 {
+		// 预扣按 defaultEstimateSeconds 估算，拿不到实际时长会一直按预扣额度收费，
+		// 属于需要人工关注的计费异常，记一条日志。
+		common.SysLog(fmt.Sprintf("sora task %s completed without a usable seconds field, keeping pre-consumed quota", task.TaskID))
+		return 0
+	}
+	// 上游返回的时长是外部输入，作为计费乘数前必须钳制
+	actual = min(actual, relaycommon.MaxTaskDurationSeconds)
+	if actual == estimated {
+		return 0
+	}
+	return common.QuotaRound(float64(task.Quota) * actual / estimated)
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
