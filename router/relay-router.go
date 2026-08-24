@@ -140,6 +140,10 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.POST("/audio/voices", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIAudio)
 		})
+		// fish.audio 原生语音合成：JSON 透传到上游 POST {base_url}/v1/tts
+		httpRouter.POST("/tts", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIAudio)
+		})
 
 		// rerank related routes
 		httpRouter.POST("/rerank", func(c *gin.Context) {
