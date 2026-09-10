@@ -21,11 +21,12 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// fish.audio 的两个私有端点。它们的请求/响应结构都不是 OpenAI 那套，
+// fish.audio 的私有端点。它们的请求/响应结构都不是 OpenAI 那套，
 // 网关只做原样透传，不解析也不重建。
 const (
-	fishVoiceClonePath = "/model"  // 创建音色模型（声音克隆），multipart
-	fishTTSPath        = "/v1/tts" // 语音合成，JSON
+	fishVoiceClonePath = "/model"                        // 创建音色模型（声音克隆），multipart
+	fishTTSPath        = "/v1/tts"                       // 语音合成，JSON
+	fishTTSTimestamped = "/v1/tts/stream/with-timestamp" // 语音合成 + 时间轴，SSE
 )
 
 // FishVoiceCloneHelper 处理声音克隆：网关 POST /v1/audio/voices → 上游 POST {base_url}/model。
@@ -39,10 +40,12 @@ func FishVoiceCloneHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.Ne
 	return fishPassthrough(c, info, fishVoiceClonePath, common.NewReplayableBodyReader(storage), 1)
 }
 
-// FishTTSHelper 处理语音合成：网关 POST /v1/tts → 上游 POST {base_url}/v1/tts。
+// FishTTSHelper 处理语音合成：网关路径原样映射到上游同名端点
+// （/v1/tts，以及带时间轴的 SSE 变体 /v1/tts/stream/with-timestamp）。
 // 客户端发 fish 原生字段（text / reference_id / format …），额外带一个 model 字段
 // 用于选渠道和计价；转发前会把 model 摘掉，其余字段原样透传。
-// 计费维度取 text 的字符数，因此固定价格（按次）和模型倍率（按量）两种配置都能用。
+// 两个端点是同一份合成工作，计费维度都取 text 的字符数，因此固定价格（按次）
+// 和模型倍率（按量）两种配置都能用。
 func FishTTSHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
@@ -62,7 +65,11 @@ func FishTTSHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErr
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
-	return fishPassthrough(c, info, fishTTSPath, bytes.NewReader(upstreamBody), utf8.RuneCountInString(text))
+	upstreamPath := fishTTSPath
+	if c.FullPath() == "/v1"+fishTTSTimestamped {
+		upstreamPath = fishTTSTimestamped
+	}
+	return fishPassthrough(c, info, upstreamPath, bytes.NewReader(upstreamBody), utf8.RuneCountInString(text))
 }
 
 // fishPassthrough 把 body 原样转发到 {base_url}+upstreamPath，响应（含 Content-Type）原样回写，
@@ -96,14 +103,32 @@ func fishPassthrough(c *gin.Context, info *relaycommon.RelayInfo, upstreamPath s
 		return newAPIError
 	}
 
-	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "" {
 		c.Writer.Header().Set("Content-Type", contentType)
 	}
+	// SSE 必须逐块下发：默认的 4KB 缓冲会把整条时间轴流攒到结束才吐给客户端。
+	var dst io.Writer = c.Writer
+	if strings.HasPrefix(contentType, "text/event-stream") {
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		dst = flushingWriter{c.Writer}
+	}
 	c.Writer.WriteHeader(resp.StatusCode)
-	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
+	if _, err = io.Copy(dst, resp.Body); err != nil {
 		return types.NewOpenAIError(fmt.Errorf("copy response body failed: %w", err), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 
 	service.PostTextConsumeQuota(c, info, &dto.Usage{PromptTokens: promptTokens, TotalTokens: promptTokens}, nil)
 	return nil
+}
+
+// flushingWriter 每写一块就 flush，用于把上游 SSE 实时透传给客户端。
+type flushingWriter struct {
+	writer gin.ResponseWriter
+}
+
+func (w flushingWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	w.writer.Flush()
+	return n, err
 }

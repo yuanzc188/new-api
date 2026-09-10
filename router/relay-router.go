@@ -143,6 +143,10 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.POST("/tts", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatOpenAIAudio)
 		})
+		// fish.audio 带时间轴的语音合成：同上，响应是 SSE 流，原样透传
+		httpRouter.POST("/tts/stream/with-timestamp", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIAudio)
+		})
 
 		// rerank related routes
 		httpRouter.POST("/rerank", func(c *gin.Context) {
