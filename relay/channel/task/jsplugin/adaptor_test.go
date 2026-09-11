@@ -698,10 +698,6 @@ export function extractUsageOnComplete(task, result, body) { return (body || {})
 			body: map[string]any{"metadata": map[string]any{"count": dto.MaxImageN + 1}},
 		},
 		{
-			name: "declared enum in resolved metadata",
-			body: map[string]any{"metadata": map[string]any{"mode": "turbo"}},
-		},
-		{
 			name: "implicit duration key without declaration",
 			body: map[string]any{"durationSeconds": relaycommon.MaxTaskDurationSeconds + 1},
 		},
@@ -741,6 +737,13 @@ export function extractUsageOnComplete(task, result, body) { return (body || {})
 			assert.Equal(t, "plugin_usage_invalid", taskErr.Code)
 		})
 	}
+
+	// 请求体里的枚举维度只用于定价，官方清单之外的写法（第三方中转常见）必须放行，
+	// 交给插件的 extractUsage 归一化；数值上限仍由上面的用例守住。
+	t.Run("unlisted enum in resolved request is accepted", func(t *testing.T) {
+		adaptor, context, info := newRequest(t, map[string]any{"metadata": map[string]any{"mode": "turbo"}})
+		assert.Nil(t, adaptor.ValidateRequestAndSetAction(context, info))
+	})
 
 	hookTests := []struct {
 		name  string

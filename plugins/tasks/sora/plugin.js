@@ -7,7 +7,7 @@ export const meta = {
     en: "OpenAI Sora video generation (text-to-video, image-to-video, and remix)",
     zh: "OpenAI Sora 视频生成（文生视频、图生视频、remix）",
   },
-  version: "1.0.4",
+  version: "1.0.5",
   channelTypes: [55, 1], // OpenAI-type channels natively serve sora with the same wire format
   author: { name: "QuantumNous" },
   models: ["sora-2", "sora-2-pro"],
@@ -127,7 +127,12 @@ export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
   let seconds = Number(req.seconds || req.duration || 4);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = 4;
-  return { seconds: Math.min(seconds, 3600), size: req.size || "720x1280" };
+  // 只上报白名单内的 size，与 extractUsageOnComplete 保持一致：第三方中转常用官方
+  // 四个尺寸之外的写法，原样上报会被 validatedUsageRatios 打回、整个任务提交失败。
+  const size = trimmed(req.size) || "720x1280";
+  const facts = { seconds: Math.min(seconds, 3600) };
+  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
+  return facts;
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {

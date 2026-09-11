@@ -10,6 +10,7 @@
 - [功能 1：/v1/videos（异步任务）执行渠道参数覆盖](#功能-1v1videos异步任务执行渠道参数覆盖)
 - [功能 3：API Key 掩码开关](#功能-3api-key-掩码开关)
 - [功能 4：sora 任务递归提取上游嵌套视频直链](#功能-4sora-任务递归提取上游嵌套视频直链)
+- [功能 7：任务插件枚举维度不拦提交](#功能-7任务插件枚举维度不拦提交)
 - [功能 5：视频任务按上游实际时长多退少补](#功能-5视频任务按上游实际时长多退少补)
 - [功能 6：fish.audio 私有端点透传（声音克隆 / 原生 TTS）](#功能-6fishaudio-私有端点透传声音克隆--原生-tts)
 - [基础设施：自建 CI（推自己的 Docker Hub）](#基础设施自建-ci推自己的-docker-hub)
@@ -27,6 +28,7 @@
 | 4 | sora 任务递归提取上游嵌套视频直链 | 插件 | `findVideoUrl`（`plugins/tasks/sora/plugin.js`） |
 | 5 | 按次计费任务仍执行 adaptor 差额结算 | 后端 | `settleTaskBillingOnComplete` |
 | 6 | fish.audio 私有端点透传（声音克隆 / 原生 TTS） | 后端 | `FishVoiceCloneHelper`、`FishTTSHelper` |
+| 7 | 任务插件枚举维度不拦提交（兼容第三方中转） | 后端 + 插件 | `validateResolvedUsageValue` |
 | - | 自建 CI 推自己的 Docker Hub | CI | `deploy-main.yml` |
 
 ---
@@ -155,6 +157,29 @@ Content-Type: application/json
 
 ---
 
+## 功能 7：任务插件枚举维度不拦提交
+
+**背景**：上游 #7076 插件化后，每个任务插件在 `meta.usageSchema` 里声明计费维度，其中枚举型字段（sora 的 `size`、doubao/vidu/hailuo 等的 `resolution`、jimeng 的 `product`）会被 `validateResolvedUsageRequest` 拿去**校验原始请求体**：请求体里只要出现同名键且值不在官方白名单里，提交直接 400 `plugin usage enum is not an allowed value`。
+
+问题在于**校验发生在归一化之前**。插件自己其实认得更宽的写法——doubao 的 `normalizeResolution` 能把 `1920x1080`、`2560x1440` 折算到档位，`extractUsageOnComplete` 也只挑白名单内的值上报——但请求体校验先一步把任务毙了。第三方中转普遍用官方清单之外的写法（如 seedance 2.x 的 `2k`、自定义 `WxH`），更新后全部下不了单。
+
+**改动**：
+
+1. `relay/channel/task/jsplugin/adaptor.go` 的 `validateResolvedUsageValue` 跳过**枚举型**维度。枚举只是定价维度，不是计费安全边界：命中不了就不参与倍率，走基础价，不会产生负费用。数值上限（`seconds` / `n`，即 `canonicalUsageLimit` 那条分支）仍然强校验，插件回报的计费事实也照旧走 `validatedUsageRatios` 严格校验，AGENTS.md 的计费安全不变量不受影响。
+2. `plugins/tasks/sora/plugin.js` 的 `extractUsage` 补上 `size` 白名单判断，与同文件 `extractUsageOnComplete` 对齐。上游这里是不对称的：完成时挑白名单、提交时原样上报，于是放开请求体校验后会改从 `EstimateBillingValidated` 二次报错。
+
+| 文件 | 改动 |
+|------|------|
+| `relay/channel/task/jsplugin/adaptor.go`（M） | `validateResolvedUsageValue` 对 `len(schema.Enum) > 0` 的维度不做请求体校验 |
+| `relay/channel/task/jsplugin/adaptor_test.go`（M） | 官方 `TestTaskAdaptorBoundsNativeUsageBeforeQuotaCalculation` 的 `declared enum in resolved metadata` 断言的是旧契约，改成正向用例「未列出的枚举值放行」，数值上限用例原样保留 |
+| `plugins/tasks/sora/plugin.js`（M） | `extractUsage` 只上报白名单内的 `size` |
+
+**代价**：用了白名单外分辨率的请求，不再按该分辨率的倍率计价，退回基础价。要精确计价就把实际用的值加进对应插件的 `usageSchema.enum`（后台「任务插件」里传自定义插件覆盖内置的即可，不必重新出镜像）。
+
+**合并注意**：`relay/channel/task/jsplugin/adaptor.go` 是官方核心文件，合并后确认 `validateResolvedUsageValue` 里的 `len(schema.Enum) == 0` 判断还在。
+
+---
+
 ## 基础设施：自建 CI（推自己的 Docker Hub）
 
 | 文件 | 改动 |
@@ -168,7 +193,7 @@ Content-Type: application/json
 
 ## 全部改动文件清单
 
-新增（A）2 个，修改（M）14 个，共 16 个：
+新增（A）2 个，修改（M）16 个，共 18 个：
 
 ```
 A  .github/workflows/deploy-main.yml                                     # 功能: CI
@@ -178,7 +203,9 @@ M  controller/relay.go                                                   # 功�
 M  controller/token.go                                                   # 功能 3
 M  middleware/distributor.go                                             # 功能 6
 M  model/option.go                                                       # 功能 3
-M  plugins/tasks/sora/plugin.js                                          # 功能 4
+M  plugins/tasks/sora/plugin.js                                          # 功能 4/7
+M  relay/channel/task/jsplugin/adaptor.go                                # 功能 7
+M  relay/channel/task/jsplugin/adaptor_test.go                           # 功能 7
 M  relay/constant/relay_mode.go                                          # 功能 6
 M  relay/constant/relay_mode_test.go                                     # 功能 6
 M  relay/relay_task.go                                                   # 功能 1
@@ -214,6 +241,7 @@ M  web/src/i18n/locales/zh.json                                          # 功�
    ```bash
    grep -rn "applyTaskParamOverride\|TokenKeyMaskEnabled\|buildMaskedTokenResponse" --include="*.go" .
    grep -n "findVideoUrl\|credentialless" plugins/tasks/sora/plugin.js
+   grep -n "len(schema.Enum) == 0" relay/channel/task/jsplugin/adaptor.go
    grep -rn "FishVoiceCloneHelper\|FishTTSHelper\|RelayModeFishTTS" --include="*.go" .
    # settleTaskBillingOnComplete 里 adaptor 调整必须在 PerCallBilling 早退之前
    grep -n "AdjustBillingOnComplete" -A 6 service/task_polling.go

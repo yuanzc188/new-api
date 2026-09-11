@@ -1336,8 +1336,14 @@ func (a *TaskAdaptor) validateResolvedUsageValue(value any) error {
 	case map[string]any:
 		for key, item := range typed {
 			if schema, declared := a.plugin.Meta.UsageSchema[key]; declared {
-				if _, err := validateUsageValue(item, schema, true); err != nil {
-					return err
+				// 枚举维度只用于定价，不是计费安全边界，这里放行：官方清单之外的写法
+				// （seedance 的 2k、WxH 尺寸等）由插件自己的 extractUsage 归一化，
+				// 不该在归一化之前就把提交拦成 400。真正的上限（seconds / n）仍然强校验，
+				// 插件回报的计费事实也照旧走 validatedUsageRatios 严格校验。
+				if len(schema.Enum) == 0 {
+					if _, err := validateUsageValue(item, schema, true); err != nil {
+						return err
+					}
 				}
 			} else if limit, canonical := canonicalUsageLimit(key); canonical {
 				if err := validateUsageLimit(item, limit, true); err != nil {
