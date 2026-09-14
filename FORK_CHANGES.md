@@ -11,6 +11,7 @@
 - [功能 3：API Key 掩码开关](#功能-3api-key-掩码开关)
 - [功能 4：sora 任务递归提取上游嵌套视频直链](#功能-4sora-任务递归提取上游嵌套视频直链)
 - [功能 7：任务插件枚举维度不拦提交](#功能-7任务插件枚举维度不拦提交)
+- [功能 8：阿里云百炼录音文件转写插件](#功能-8阿里云百炼录音文件转写插件)
 - [功能 5：视频任务按上游实际时长多退少补](#功能-5视频任务按上游实际时长多退少补)
 - [功能 6：fish.audio 私有端点透传（声音克隆 / 原生 TTS）](#功能-6fishaudio-私有端点透传声音克隆--原生-tts)
 - [基础设施：自建 CI（推自己的 Docker Hub）](#基础设施自建-ci推自己的-docker-hub)
@@ -29,6 +30,7 @@
 | 5 | 按次计费任务仍执行 adaptor 差额结算 | 后端 | `settleTaskBillingOnComplete` |
 | 6 | fish.audio 私有端点透传（声音克隆 / 原生 TTS） | 后端 | `FishVoiceCloneHelper`、`FishTTSHelper` |
 | 7 | 任务插件枚举维度不拦提交（兼容第三方中转） | 后端 + 插件 | `validateResolvedUsageValue` |
+| 8 | 阿里云百炼录音文件转写（长音频 ASR） | 插件（上传型） | `plugins/contrib/qwen-asr-filetrans/` |
 | - | 自建 CI 推自己的 Docker Hub | CI | `deploy-main.yml` |
 
 ---
@@ -180,6 +182,44 @@ Content-Type: application/json
 
 ---
 
+## 功能 8：阿里云百炼录音文件转写插件
+
+**背景**：阿里云百炼的 ASR 有两类模型。`qwen3-asr-flash` 支持 OpenAI 兼容调用（`/chat/completions`，音频放 `input_audio`），但**只吃 5 分钟以内的音频**；长音频必须用 `qwen-audio-3.0-asr-flash-filetrans` / `qwen3-asr-flash-filetrans`，它们只有 DashScope 原生**异步任务**协议——提交任务 → 轮询 → 拿 `transcription_url` 再取一次结果 JSON，且只收公网 URL、不收上传文件。三点都跟 `/v1/audio/transcriptions` 对不上，而且百炼渠道的 `ConvertAudioRequest` 本来就是 `not implemented`。
+
+**改动**：写一个任务插件覆盖这条链路，**不内置进镜像**，通过后台「任务插件」页上传。
+
+| 文件 | 说明 |
+|------|------|
+| `plugins/contrib/qwen-asr-filetrans/plugin.js`（A，新增） | 插件源码，仓库留档便于版本管理 |
+| `plugins/contrib/qwen-asr-filetrans/golden.json`（A，新增） | fixture，覆盖全部导出钩子及主要错误分支（21 例） |
+| `plugins/contrib/README.md`（A，新增） | contrib 目录的定位与本地校验命令 |
+
+**为什么不放 `plugins/tasks/`**：上游对内置插件有硬契约——`plugins/builtin_plugins_test.go` 要求每个内置插件都声明 `openai_responses` 协议并实现 `decodeRequest` / `renderEvents` / `renderFinal`。异步 ASR 套不进 Responses 语义，硬塞会让官方测试挂掉。`plugins/embed.go` 只嵌入 `tasks` 目录，放 `contrib` 不影响构建。
+
+**客户端接口**：路径照搬 DashScope 原样，客户端把 base URL 指到网关即可复用原有 SDK。
+
+| 网关路由 | 上游 |
+|------|------|
+| `POST /dashscope/api/v1/services/audio/asr/transcription` | `{base}/api/v1/services/audio/asr/transcription`（带 `X-DashScope-Async: enable`） |
+| `GET /dashscope/api/v1/tasks/:task_id` | `{base}/api/v1/tasks/{id}` |
+
+另外网关自带的通用面也可用：`GET /v1/tasks/:taskId`、`GET /v1/tasks/:taskId/artifacts`、`GET /v1/tasks/:taskId/artifacts/transcription-1/content`。
+
+**计费**：维度是 `audio_seconds`（1 = 1 秒）。提交时拿不到真实时长，先按客户端可选的 `audio_seconds` 提示预扣，没给就按 300 秒 × 文件数；完成时从上游 `usage.duration` 读实际时长重算，多退少补。
+
+- 这里**故意没用** `unit: "second"`：宿主会把「秒」维度硬卡在 `MaxTaskDurationSeconds`(3600)，而录音文件转写本来就是拿来跑超过一小时的长音频的，卡上限会让长文件静默少计费。`unit: "credit"` 走额度饱和上限，够用且不会溢出。
+- 上游 `usage.duration` 是外部输入，插件内先钳到 24 小时再上报，符合计费安全不变量。
+- **多退少补要求模型价格配成「用量表达式」**（会生成 `TieredSnapshot`）。配成固定价格的话完成时不重算，只保留预扣——这点和功能 5 的注意事项一致。
+
+**其它要点**：
+
+- `parameters` 即使为空也必须带上，缺了上游会「提交成功但识别失败」。
+- 整单 `SUCCEEDED` 但子任务全 `FAILED` 时（如 `FILE_DOWNLOAD_FAILED`），插件按失败结算，让用户拿到退款。
+- 转写结果在 OSS 签名直链上（24 小时有效），artifact 用 `credentialless: true` 回源，不带渠道 key。
+- `meta.models` 是硬门槛，请求里的模型名必须在列表内，或在后台配「任务模型别名」映射过去。
+
+---
+
 ## 基础设施：自建 CI（推自己的 Docker Hub）
 
 | 文件 | 改动 |
@@ -193,10 +233,13 @@ Content-Type: application/json
 
 ## 全部改动文件清单
 
-新增（A）2 个，修改（M）16 个，共 18 个：
+新增（A）5 个，修改（M）16 个，共 21 个：
 
 ```
 A  .github/workflows/deploy-main.yml                                     # 功能: CI
+A  plugins/contrib/README.md                                             # 功能 8
+A  plugins/contrib/qwen-asr-filetrans/golden.json                        # 功能 8
+A  plugins/contrib/qwen-asr-filetrans/plugin.js                          # 功能 8
 A  relay/fish_handler.go                                                 # 功能 6
 M  common/constants.go                                                   # 功能 3
 M  controller/relay.go                                                   # 功能 6
@@ -242,6 +285,7 @@ M  web/src/i18n/locales/zh.json                                          # 功�
    grep -rn "applyTaskParamOverride\|TokenKeyMaskEnabled\|buildMaskedTokenResponse" --include="*.go" .
    grep -n "findVideoUrl\|credentialless" plugins/tasks/sora/plugin.js
    grep -n "len(schema.Enum) == 0" relay/channel/task/jsplugin/adaptor.go
+   ls plugins/contrib/qwen-asr-filetrans/
    grep -rn "FishVoiceCloneHelper\|FishTTSHelper\|RelayModeFishTTS" --include="*.go" .
    # settleTaskBillingOnComplete 里 adaptor 调整必须在 PerCallBilling 早退之前
    grep -n "AdjustBillingOnComplete" -A 6 service/task_polling.go

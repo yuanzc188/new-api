@@ -1,0 +1,135 @@
+{
+  "cases": [
+    {
+      "name": "createTask 接受 DashScope 原生 body",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/dashscope/api/v1/services/audio/asr/transcription","params":{},"query":{},"body":{"kind":"json","value":{"model":"qwen-audio-3.0-asr-flash-filetrans","input":{"file_urls":["https://example.com/a.mp3"]}}}}],
+      "expected": {"kind":"submit","model":"qwen-audio-3.0-asr-flash-filetrans","action":"transcription","requestBody":{"model":"qwen-audio-3.0-asr-flash-filetrans","input":{"file_urls":["https://example.com/a.mp3"]},"parameters":{}}}
+    },
+    {
+      "name": "createTask 接受扁平 file_url 并带时长提示",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/dashscope/api/v1/services/audio/asr/transcription","params":{},"query":{},"body":{"kind":"json","value":{"model":"qwen3-asr-flash-filetrans","file_url":"https://example.com/b.wav","audio_seconds":1800,"parameters":{"vocabulary_id":"v1"}}}}],
+      "expected": {"kind":"submit","model":"qwen3-asr-flash-filetrans","action":"transcription","requestBody":{"model":"qwen3-asr-flash-filetrans","input":{"file_urls":["https://example.com/b.wav"]},"parameters":{"vocabulary_id":"v1"},"audio_seconds":1800}}
+    },
+    {
+      "name": "createTask 缺少音频 URL 报错",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/dashscope/api/v1/services/audio/asr/transcription","params":{},"query":{},"body":{"kind":"json","value":{"model":"qwen3-asr-flash-filetrans"}}}],
+      "expectedError": "input.file_urls is required"
+    },
+    {
+      "name": "buildSubmitRequest 带异步头与空 parameters",
+      "hook": "buildSubmitRequest",
+      "args": [{"requestBody":{"model":"m","input":{"file_urls":["https://example.com/a.mp3"]}},"baseUrl":"https://ws.cn-beijing.maas.aliyuncs.com","apiKey":"sk-test","upstreamModel":"qwen-audio-3.0-asr-flash-filetrans"}],
+      "expected": {"url":"https://ws.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/asr/transcription","method":"POST","headers":{"Authorization":"Bearer sk-test","Content-Type":"application/json","X-DashScope-Async":"enable"},"body":{"model":"qwen-audio-3.0-asr-flash-filetrans","input":{"file_urls":["https://example.com/a.mp3"]},"parameters":{}}}
+    },
+    {
+      "name": "parseSubmitResponse 取 output.task_id",
+      "hook": "parseSubmitResponse",
+      "args": [{}, {"statusCode":200,"headers":{},"body":{"output":{"task_status":"PENDING","task_id":"c2e5d63b"},"request_id":"77ae55ae"}}],
+      "expected": {"taskId":"c2e5d63b","taskData":{"output":{"task_status":"PENDING","task_id":"c2e5d63b"},"request_id":"77ae55ae"}}
+    },
+    {
+      "name": "buildQueryRequest",
+      "hook": "buildQueryRequest",
+      "args": [{"taskId":"c2e5d63b","baseUrl":"https://ws.cn-beijing.maas.aliyuncs.com","apiKey":"sk-test"}],
+      "expected": {"url":"https://ws.cn-beijing.maas.aliyuncs.com/api/v1/tasks/c2e5d63b","method":"GET","headers":{"Authorization":"Bearer sk-test"}}
+    },
+    {
+      "name": "parseTaskResult PENDING 映射为排队",
+      "hook": "parseTaskResult",
+      "args": [{}, {"output":{"task_status":"PENDING"}}],
+      "expected": {"status":"QUEUED"}
+    },
+    {
+      "name": "parseTaskResult 成功",
+      "hook": "parseTaskResult",
+      "args": [{}, {"output":{"task_status":"SUCCEEDED","results":[{"file_url":"https://example.com/a.mp3","transcription_url":"https://oss.example.com/r.json","subtask_status":"SUCCEEDED"}]},"usage":{"duration":9}}],
+      "expected": {"status":"SUCCESS"}
+    },
+    {
+      "name": "parseTaskResult 整单成功但子任务全失败按失败结算",
+      "hook": "parseTaskResult",
+      "args": [{}, {"output":{"task_status":"SUCCEEDED","results":[{"file_url":"https://example.com/a.mp3","code":"FILE_DOWNLOAD_FAILED","message":"FILE_DOWNLOAD_FAILED","subtask_status":"FAILED"}]}}],
+      "expected": {"status":"FAILURE","reason":"FILE_DOWNLOAD_FAILED"}
+    },
+    {
+      "name": "parseTaskResult 未知状态",
+      "hook": "parseTaskResult",
+      "args": [{}, {"output":{"task_status":"WAT"}}],
+      "expected": {"status":"UNKNOWN","reason":"unrecognized task_status: WAT"}
+    },
+    {
+      "name": "extractUsage 无提示按默认值乘文件数预扣",
+      "hook": "extractUsage",
+      "args": [{"requestBody":{"input":{"file_urls":["https://example.com/a.mp3","https://example.com/b.mp3"]}}}],
+      "expected": {"audio_seconds": 600}
+    },
+    {
+      "name": "extractUsage 使用客户端时长提示",
+      "hook": "extractUsage",
+      "args": [{"requestBody":{"audio_seconds":1800,"input":{"file_urls":["https://example.com/a.mp3"]}}}],
+      "expected": {"audio_seconds": 1800}
+    },
+    {
+      "name": "extractUsageOnComplete 按上游实际时长结算",
+      "hook": "extractUsageOnComplete",
+      "args": [{}, {}, {"usage":{"duration":7200}}],
+      "expected": {"audio_seconds": 7200}
+    },
+    {
+      "name": "extractUsageOnComplete 钳制异常时长",
+      "hook": "extractUsageOnComplete",
+      "args": [{}, {}, {"usage":{"duration":99999999}}],
+      "expected": {"audio_seconds": 86400}
+    },
+    {
+      "name": "extractUsageOnComplete 缺时长时保持预扣",
+      "hook": "extractUsageOnComplete",
+      "args": [{}, {}, {"output":{"task_status":"SUCCEEDED"}}],
+      "expected": {}
+    },
+    {
+      "name": "listArtifacts 每个成功子任务一个文件",
+      "hook": "listArtifacts",
+      "args": [{"taskId":"t1","status":"SUCCESS","action":"transcription","producerVersion":"1.0.0","data":{"output":{"results":[{"transcription_url":"https://oss.example.com/1.json"},{"transcription_url":"https://oss.example.com/2.json"}]}}}],
+      "expected": [{"key":"transcription-1","type":"file","mimeType":"application/json"},{"key":"transcription-2","type":"file","mimeType":"application/json"}]
+    },
+    {
+      "name": "listArtifacts 未完成时为空",
+      "hook": "listArtifacts",
+      "args": [{"taskId":"t1","status":"IN_PROGRESS","action":"transcription","producerVersion":"1.0.0","data":{}}],
+      "expected": []
+    },
+    {
+      "name": "buildContentRequest 直链免凭证回源",
+      "hook": "buildContentRequest",
+      "args": [{"artifactKey":"transcription-2","clientRequest":{"method":"GET","headers":{}},"data":{"output":{"results":[{"transcription_url":"https://oss.example.com/1.json"},{"transcription_url":"https://oss.example.com/2.json"}]}}}],
+      "expected": {"url":"https://oss.example.com/2.json","method":"GET","credentialless":true}
+    },
+    {
+      "name": "buildContentRequest 未知 key 报错",
+      "hook": "buildContentRequest",
+      "args": [{"artifactKey":"transcription-9","clientRequest":{"method":"GET","headers":{}},"data":{"output":{"results":[{"transcription_url":"https://oss.example.com/1.json"}]}}}],
+      "expectedError": "artifact_not_found"
+    },
+    {
+      "name": "taskCreated 只回网关任务 id",
+      "hook": "native",
+      "member": "taskCreated",
+      "args": [{}, {"task_id":"gw-1","status":"SUBMITTED"}],
+      "expected": {"output":{"task_id":"gw-1","task_status":"PENDING"},"request_id":"gw-1"}
+    },
+    {
+      "name": "taskStatus 用网关任务 id 覆盖上游 id",
+      "hook": "native",
+      "member": "taskStatus",
+      "args": [{}, {"task_id":"gw-1","status":"SUCCESS","data":{"output":{"task_id":"upstream-1","task_status":"SUCCEEDED","results":[{"transcription_url":"https://oss.example.com/1.json","subtask_status":"SUCCEEDED"}]},"usage":{"duration":9}}}],
+      "expected": {"output":{"task_id":"gw-1","task_status":"SUCCEEDED","results":[{"transcription_url":"https://oss.example.com/1.json","subtask_status":"SUCCEEDED"}]},"usage":{"duration":9},"request_id":"gw-1"}
+    }
+  ]
+}
