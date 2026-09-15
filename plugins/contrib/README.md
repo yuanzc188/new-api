@@ -19,3 +19,4 @@ go build -o /tmp/new-api .        # 需要 web/dist，没有就先 mkdir -p web/
 | 目录 | 用途 |
 |------|------|
 | `qwen-asr-filetrans/` | 阿里云百炼非实时语音识别（录音文件转写），DashScope 异步协议 |
+| `video-generate/` | 第三方 seedance 风格视频生成，`POST /v1/video/generate` content 数组协议 |

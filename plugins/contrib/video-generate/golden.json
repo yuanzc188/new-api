@@ -1,0 +1,183 @@
+{
+  "cases": [
+    {
+      "name": "文生视频",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"海浪拍打沙滩"}],"resolution":"720p","duration":5,"ratio":"16:9"}}}],
+      "expected": {"kind":"submit","model":"doubao-seedance-2-0-260128","action":"text_to_video","requestBody":{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"海浪拍打沙滩"}],"resolution":"720p","duration":5,"ratio":"16:9"}}
+    },
+    {
+      "name": "图生视频识别为 image_to_video",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0-fast","content":[{"type":"text","text":"人物开始奔跑"},{"type":"image_url","image_url":{"url":"https://example.com/input.jpg"},"role":"first_frame"}]}}}],
+      "expected": {"kind":"submit","model":"seedance-2.0-fast","action":"image_to_video","requestBody":{"model":"seedance-2.0-fast","content":[{"type":"text","text":"人物开始奔跑"},{"type":"image_url","image_url":{"url":"https://example.com/input.jpg"},"role":"first_frame"}]}}
+    },
+    {
+      "name": "视频续写识别为 reference_to_video",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[{"type":"text","text":"场景继续"},{"type":"video_url","video_url":{"url":"https://example.com/reference.mp4"},"role":"reference_video"}]}}}],
+      "expected": {"kind":"submit","model":"seedance-2.0","action":"reference_to_video","requestBody":{"model":"seedance-2.0","content":[{"type":"text","text":"场景继续"},{"type":"video_url","video_url":{"url":"https://example.com/reference.mp4"},"role":"reference_video"}]}}
+    },
+    {
+      "name": "asset:// 素材地址原样透传",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[{"type":"text","text":"奔跑"},{"type":"image_url","image_url":{"url":"asset://asset-20260603123456-xxx"},"role":"first_frame"}],"resolution":"720p"}}}],
+      "expected": {"kind":"submit","model":"seedance-2.0","action":"image_to_video","requestBody":{"model":"seedance-2.0","content":[{"type":"text","text":"奔跑"},{"type":"image_url","image_url":{"url":"asset://asset-20260603123456-xxx"},"role":"first_frame"}],"resolution":"720p"}}
+    },
+    {
+      "name": "两个 first_frame 报错",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[{"type":"image_url","image_url":{"url":"https://a.jpg"},"role":"first_frame"},{"type":"image_url","image_url":{"url":"https://b.jpg"},"role":"first_frame"}]}}}],
+      "expectedError": "only one content item may use role first_frame"
+    },
+    {
+      "name": "非法分辨率报错",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[{"type":"text","text":"x"}],"resolution":"2k"}}}],
+      "expectedError": "resolution must be one of 480p / 720p / 1080p"
+    },
+    {
+      "name": "超界时长报错",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[{"type":"text","text":"x"}],"duration":99999}}}],
+      "expectedError": "duration must be between 1 and 3600"
+    },
+    {
+      "name": "content 为空报错",
+      "hook": "native",
+      "member": "createTask",
+      "args": [{"method":"POST","path":"/v1/video/generate","params":{},"query":{},"body":{"kind":"json","value":{"model":"seedance-2.0","content":[]}}}],
+      "expectedError": "content is required"
+    },
+    {
+      "name": "buildSubmitRequest 透传可选参数",
+      "hook": "buildSubmitRequest",
+      "args": [{"requestBody":{"model":"alias","content":[{"type":"text","text":"x"}],"resolution":"1080p","duration":10,"watermark":false,"seed":42},"baseUrl":"https://api.example.com","apiKey":"sk-test","upstreamModel":"doubao-seedance-2-0-260128"}],
+      "expected": {"url":"https://api.example.com/v1/video/generate","method":"POST","headers":{"Authorization":"Bearer sk-test","Content-Type":"application/json"},"body":{"model":"doubao-seedance-2-0-260128","content":[{"type":"text","text":"x"}],"resolution":"1080p","duration":10,"watermark":false,"seed":42}}
+    },
+    {
+      "name": "parseSubmitResponse",
+      "hook": "parseSubmitResponse",
+      "args": [{}, {"statusCode":200,"headers":{},"body":{"task_id":"7ccc6fa2-xxx","status":"queued","model":"doubao-seedance-2-0-260128","created_at":"2026-06-03T12:00:00Z"}}],
+      "expected": {"taskId":"7ccc6fa2-xxx","taskData":{"task_id":"7ccc6fa2-xxx","status":"queued","model":"doubao-seedance-2-0-260128","created_at":"2026-06-03T12:00:00Z"}}
+    },
+    {
+      "name": "parseSubmitResponse 缺 task_id 报错",
+      "hook": "parseSubmitResponse",
+      "args": [{}, {"statusCode":200,"headers":{},"body":{"status":"queued"}}],
+      "expectedError": "task_id is empty"
+    },
+    {
+      "name": "buildQueryRequest",
+      "hook": "buildQueryRequest",
+      "args": [{"taskId":"7ccc6fa2-xxx","baseUrl":"https://api.example.com","apiKey":"sk-test"}],
+      "expected": {"url":"https://api.example.com/v1/video/tasks/7ccc6fa2-xxx","method":"GET","headers":{"Authorization":"Bearer sk-test"}}
+    },
+    {
+      "name": "parseTaskResult running",
+      "hook": "parseTaskResult",
+      "args": [{}, {"status":"running"}],
+      "expected": {"status":"IN_PROGRESS"}
+    },
+    {
+      "name": "parseTaskResult succeeded",
+      "hook": "parseTaskResult",
+      "args": [{}, {"status":"succeeded","content":{"video_url":"https://cdn.example.com/x.mp4"},"usage":{"duration":5}}],
+      "expected": {"status":"SUCCESS"}
+    },
+    {
+      "name": "parseTaskResult failed 带原因",
+      "hook": "parseTaskResult",
+      "args": [{}, {"status":"failed","error":{"message":"content policy"}}],
+      "expected": {"status":"FAILURE","reason":"content policy"}
+    },
+    {
+      "name": "parseTaskResult 未知状态",
+      "hook": "parseTaskResult",
+      "args": [{}, {"status":"weird"}],
+      "expected": {"status":"UNKNOWN","reason":"unrecognized status: weird"}
+    },
+    {
+      "name": "extractUsage 取请求参数",
+      "hook": "extractUsage",
+      "args": [{"requestBody":{"duration":10,"resolution":"1080p"}}],
+      "expected": {"seconds":10,"resolution":"1080p"}
+    },
+    {
+      "name": "extractUsage 缺省值",
+      "hook": "extractUsage",
+      "args": [{"requestBody":{}}],
+      "expected": {"seconds":5,"resolution":"720p"}
+    },
+    {
+      "name": "extractUsage 白名单外分辨率退回默认值",
+      "hook": "extractUsage",
+      "args": [{"requestBody":{"resolution":"2k","duration":5}}],
+      "expected": {"seconds":5,"resolution":"720p"}
+    },
+    {
+      "name": "extractUsageOnComplete 按上游实际时长结算",
+      "hook": "extractUsageOnComplete",
+      "args": [{}, {}, {"status":"succeeded","usage":{"duration":8},"resolution":"1080p"}],
+      "expected": {"seconds":8,"resolution":"1080p"}
+    },
+    {
+      "name": "extractUsageOnComplete 缺时长时保持预扣",
+      "hook": "extractUsageOnComplete",
+      "args": [{}, {}, {"status":"succeeded"}],
+      "expected": {}
+    },
+    {
+      "name": "listArtifacts 成功且有直链",
+      "hook": "listArtifacts",
+      "args": [{"taskId":"t1","status":"SUCCESS","action":"text_to_video","producerVersion":"1.0.0","data":{"content":{"video_url":"https://cdn.example.com/x.mp4"}}}],
+      "expected": [{"key":"video","type":"video"}]
+    },
+    {
+      "name": "listArtifacts 未完成为空",
+      "hook": "listArtifacts",
+      "args": [{"taskId":"t1","status":"IN_PROGRESS","action":"text_to_video","producerVersion":"1.0.0","data":{}}],
+      "expected": []
+    },
+    {
+      "name": "buildContentRequest 直链免凭证回源",
+      "hook": "buildContentRequest",
+      "args": [{"artifactKey":"video","clientRequest":{"method":"GET","headers":{}},"data":{"content":{"video_url":"https://cdn.example.com/x.mp4"}}}],
+      "expected": {"url":"https://cdn.example.com/x.mp4","method":"GET","credentialless":true}
+    },
+    {
+      "name": "buildContentRequest 未知 key 报错",
+      "hook": "buildContentRequest",
+      "args": [{"artifactKey":"audio","clientRequest":{"method":"GET","headers":{}},"data":{"content":{"video_url":"https://cdn.example.com/x.mp4"}}}],
+      "expectedError": "artifact_not_found"
+    },
+    {
+      "name": "taskCreated 换成网关任务 id",
+      "hook": "native",
+      "member": "taskCreated",
+      "args": [{}, {"task_id":"gw-1","status":"SUBMITTED","data":{"task_id":"upstream-1","status":"queued","model":"doubao-seedance-2-0-260128","created_at":"2026-06-03T12:00:00Z"}}],
+      "expected": {"task_id":"gw-1","status":"queued","model":"doubao-seedance-2-0-260128","created_at":"2026-06-03T12:00:00Z"}
+    },
+    {
+      "name": "taskStatus 换成网关任务 id 并保留直链",
+      "hook": "native",
+      "member": "taskStatus",
+      "args": [{}, {"task_id":"gw-1","status":"SUCCESS","data":{"id":"upstream-1","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://cdn.example.com/x.mp4"},"usage":{"duration":5},"created_at":1717411200}}],
+      "expected": {"id":"gw-1","model":"doubao-seedance-2-0-260128","status":"succeeded","content":{"video_url":"https://cdn.example.com/x.mp4"},"usage":{"duration":5},"created_at":1717411200}
+    },
+    {
+      "name": "taskStatus 失败时补上原因",
+      "hook": "native",
+      "member": "taskStatus",
+      "args": [{}, {"task_id":"gw-1","status":"FAILURE","fail_reason":"upstream rejected","data":{"id":"upstream-1"}}],
+      "expected": {"id":"gw-1","status":"failed","error":"upstream rejected"}
+    }
+  ]
+}

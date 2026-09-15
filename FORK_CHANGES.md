@@ -13,6 +13,7 @@
 - [功能 7：任务插件枚举维度不拦提交](#功能-7任务插件枚举维度不拦提交)
 - [功能 8：阿里云百炼录音文件转写插件](#功能-8阿里云百炼录音文件转写插件)
 - [功能 9：Gemini 内置工具 + Function calling 自动开启开关](#功能-9gemini-内置工具--function-calling-自动开启开关)
+- [功能 10：第三方 seedance 视频生成协议插件](#功能-10第三方-seedance-视频生成协议插件)
 - [功能 5：视频任务按上游实际时长多退少补](#功能-5视频任务按上游实际时长多退少补)
 - [功能 6：fish.audio 私有端点透传（声音克隆 / 原生 TTS）](#功能-6fishaudio-私有端点透传声音克隆--原生-tts)
 - [基础设施：自建 CI（推自己的 Docker Hub）](#基础设施自建-ci推自己的-docker-hub)
@@ -33,6 +34,7 @@
 | 7 | 任务插件枚举维度不拦提交（兼容第三方中转） | 后端 + 插件 | `validateResolvedUsageValue` |
 | 8 | 阿里云百炼录音文件转写（长音频 ASR） | 插件（上传型） | `plugins/contrib/qwen-asr-filetrans/` |
 | 9 | Gemini 内置工具 + Function calling 不再被上游拒 | relaykit | `enableGeminiServerSideToolInvocations` |
+| 10 | 第三方 seedance 视频生成协议（`/v1/video/generate`） | 插件（上传型） | `plugins/contrib/video-generate/` |
 | - | 自建 CI 推自己的 Docker Hub | CI | `deploy-main.yml` |
 
 ---
@@ -245,6 +247,40 @@ Please enable tool_config.include_server_side_tool_invocations to use Built-in t
 
 ---
 
+## 功能 10：第三方 seedance 视频生成协议插件
+
+**背景**：中转上游提供的是自己的原生协议 —— `POST /v1/video/generate`（`content` 数组，`resolution` / `duration` / `ratio` 等放顶层）+ `GET /v1/video/tasks/:task_id`。官方网关没有这两条路由。
+
+顺带解决了一个老问题：以前把这个上游挂在 `/v1/videos` 上，`resolution` 会被 `relay/common/relay_info.go` 的 `TaskSubmitReq` 封闭结构体吃掉（只能塞进 `metadata`，渠道参数覆盖也因为跑在解析之后而全部失效）。插件的 **native 路由自带 decode 钩子，直接拿原始请求体**，绕开了那个结构体，顶层字段原样透传。
+
+**改动**：新增上传型插件 `plugins/contrib/video-generate/`。
+
+| 文件 | 说明 |
+|------|------|
+| `plugins/contrib/video-generate/plugin.js`（A，新增） | 插件源码 |
+| `plugins/contrib/video-generate/golden.json`（A，新增） | fixture，28 例覆盖全部钩子与错误分支 |
+
+**客户端接口**：路径照搬上游原样，客户端把 base URL 指到网关即可。
+
+| 网关路由 | 上游 |
+|------|------|
+| `POST /v1/video/generate` | `{base}/v1/video/generate` |
+| `GET /v1/video/tasks/:task_id` | `{base}/v1/video/tasks/{id}` |
+
+三种模式由 `content` 数组自动判定：带 `video_url` → `reference_to_video`，带 `image_url` → `image_to_video`，都没有 → `text_to_video`。`asset://` 素材地址原样透传。
+
+**与宿主路由不冲突**：官方已有 `/v1/video/generations` 与 `/v1/video/generations/:task_id`（`router/video-router.go`），第三段静态段不同；插件路由挂在 `NoRoute` 之后，已用 `pluginRouteDispatcher` 实测两条路径都正确命中插件。
+
+**计费**：维度 `seconds` + `resolution`。提交时按请求里的 `duration`（缺省 5）和 `resolution`（缺省 720p）预扣，完成时读上游 `usage.duration` 重算多退少补。
+
+- `duration` 超界（>3600 或 ≤0）在 decode 阶段直接 400 拒掉，不静默钳值——避免客户端以为按它发的时长出片。
+- `extractUsage` 只上报白名单内的 `resolution`，白名单外退回默认值。上游枚举与官方清单不一致是常态（见功能 7），原样上报会被计费事实校验打回、整个提交失败。
+- 多退少补同样要求模型价格配成「用量表达式」。
+
+**合并注意**：`plugins/contrib/` 不被 `plugins/embed.go` 嵌入，不影响构建；改完用 `new-api plugin lint` + `plugin test` 验证。
+
+---
+
 ## 基础设施：自建 CI（推自己的 Docker Hub）
 
 | 文件 | 改动 |
@@ -258,13 +294,15 @@ Please enable tool_config.include_server_side_tool_invocations to use Built-in t
 
 ## 全部改动文件清单
 
-新增（A）6 个，修改（M）17 个，共 23 个：
+新增（A）8 个，修改（M）17 个，共 25 个：
 
 ```
 A  .github/workflows/deploy-main.yml                                     # 功能: CI
 A  plugins/contrib/README.md                                             # 功能 8
 A  plugins/contrib/qwen-asr-filetrans/golden.json                        # 功能 8
 A  plugins/contrib/qwen-asr-filetrans/plugin.js                          # 功能 8
+A  plugins/contrib/video-generate/golden.json                           # 功能 10
+A  plugins/contrib/video-generate/plugin.js                             # 功能 10
 A  relay/fish_handler.go                                                 # 功能 6
 M  common/constants.go                                                   # 功能 3
 M  controller/relay.go                                                   # 功能 6
