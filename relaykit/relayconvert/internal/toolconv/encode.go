@@ -331,6 +331,7 @@ func attachGeminiRequest(request any, set Set) (any, []types.ConversionDiagnosti
 			}
 			target.ToolConfig = &config
 		}
+		enableGeminiServerSideToolInvocations(target, tools)
 		return target, unsupportedHostedHistoryDiagnostics(types.RelayFormatGemini, set.History), nil
 	}
 	var (
@@ -441,6 +442,7 @@ func attachGeminiRequest(request any, set Set) (any, []types.ConversionDiagnosti
 	}
 	config, choiceDiagnostics := encodeGeminiChoice(set.Choice)
 	target.ToolConfig = config
+	enableGeminiServerSideToolInvocations(target, tools)
 	diagnostics = append(diagnostics, choiceDiagnostics...)
 	if set.ParallelAllowed != nil && !*set.ParallelAllowed {
 		diagnostics = append(diagnostics, semanticLoss(
@@ -451,6 +453,37 @@ func attachGeminiRequest(request any, set Set) (any, []types.ConversionDiagnosti
 	}
 	diagnostics = append(diagnostics, unsupportedHostedHistoryDiagnostics(types.RelayFormatGemini, set.History)...)
 	return target, diagnostics, nil
+}
+
+// enableGeminiServerSideToolInvocations opts a Gemini request into server-side
+// tool invocations when the encoded tool groups pair a built-in tool
+// (googleSearch, codeExecution, urlContext, …) with function declarations.
+// Gemini rejects that combination outright — "Please enable
+// tool_config.include_server_side_tool_invocations to use Built-in tools with
+// Function calling" — and clients such as Codex routinely send both in one
+// request. A value the client set explicitly is never overwritten.
+func enableGeminiServerSideToolInvocations(target *dto.GeminiChatRequest, tools []map[string]any) {
+	builtIn, functions := false, false
+	for _, group := range tools {
+		for key := range group {
+			if key == "functionDeclarations" {
+				functions = true
+				continue
+			}
+			builtIn = true
+		}
+	}
+	if !builtIn || !functions {
+		return
+	}
+	if target.ToolConfig == nil {
+		target.ToolConfig = &dto.ToolConfig{}
+	}
+	if target.ToolConfig.IncludeServerSideToolInvocations != nil {
+		return
+	}
+	enabled := true
+	target.ToolConfig.IncludeServerSideToolInvocations = &enabled
 }
 
 func rebuildGeminiToolGroups(definitions []Definition) ([]map[string]any, error) {

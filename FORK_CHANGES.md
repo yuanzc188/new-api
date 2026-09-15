@@ -12,6 +12,7 @@
 - [功能 4：sora 任务递归提取上游嵌套视频直链](#功能-4sora-任务递归提取上游嵌套视频直链)
 - [功能 7：任务插件枚举维度不拦提交](#功能-7任务插件枚举维度不拦提交)
 - [功能 8：阿里云百炼录音文件转写插件](#功能-8阿里云百炼录音文件转写插件)
+- [功能 9：Gemini 内置工具 + Function calling 自动开启开关](#功能-9gemini-内置工具--function-calling-自动开启开关)
 - [功能 5：视频任务按上游实际时长多退少补](#功能-5视频任务按上游实际时长多退少补)
 - [功能 6：fish.audio 私有端点透传（声音克隆 / 原生 TTS）](#功能-6fishaudio-私有端点透传声音克隆--原生-tts)
 - [基础设施：自建 CI（推自己的 Docker Hub）](#基础设施自建-ci推自己的-docker-hub)
@@ -31,6 +32,7 @@
 | 6 | fish.audio 私有端点透传（声音克隆 / 原生 TTS） | 后端 | `FishVoiceCloneHelper`、`FishTTSHelper` |
 | 7 | 任务插件枚举维度不拦提交（兼容第三方中转） | 后端 + 插件 | `validateResolvedUsageValue` |
 | 8 | 阿里云百炼录音文件转写（长音频 ASR） | 插件（上传型） | `plugins/contrib/qwen-asr-filetrans/` |
+| 9 | Gemini 内置工具 + Function calling 不再被上游拒 | relaykit | `enableGeminiServerSideToolInvocations` |
 | - | 自建 CI 推自己的 Docker Hub | CI | `deploy-main.yml` |
 
 ---
@@ -220,6 +222,29 @@ Content-Type: application/json
 
 ---
 
+## 功能 9：Gemini 内置工具 + Function calling 自动开启开关
+
+**背景**：Codex 之类的客户端会在同一个请求里既带自己的函数（function calling），又带联网/代码执行这类内置工具。Gemini 对这个组合有个硬要求——必须同时设 `toolConfig.includeServerSideToolInvocations`，否则整个请求 400：
+
+```
+Please enable tool_config.include_server_side_tool_invocations to use Built-in tools with Function calling.
+```
+
+`relaykit/dto/gemini.go:47` 早就有 `IncludeServerSideToolInvocations` 字段，但**全仓库没有一处给它赋值**，于是 Codex + Gemini 一开联网就必挂。
+
+**改动**：`relaykit/relayconvert/internal/toolconv/encode.go` 的 `attachGeminiRequest` 是所有 Gemini 请求注入工具的唯一入口（`AttachRequest` 的 Gemini 分支）。在编码完工具组之后，若同时存在内置工具（`googleSearch` / `codeExecution` / `urlContext` …）和 `functionDeclarations`，就补上这个开关。两条源路径（转换路径与 Gemini 原生透传）都覆盖。
+
+| 文件 | 改动 |
+|------|------|
+| `relaykit/relayconvert/internal/toolconv/encode.go`（M） | 新增 `enableGeminiServerSideToolInvocations`，在转换路径与原生透传路径各调用一次 |
+| `relaykit/relayconvert/internal/toolconv/gemini_builtin_tools_test.go`（A，新增） | 表驱动回归：内置+函数→开启、只有函数→不动、只有内置→不动；另加一例「客户端已显式设值时不覆盖」 |
+
+**边界**：客户端自己设过这个字段就不覆盖（Gemini 原生透传的客户端可能有意关掉）。只有内置工具或只有函数声明时都不加——Gemini 只在两者混用时才要求它。
+
+**合并注意**：`relaykit` 是独立 Go 模块，改完必须 `cd relaykit && GOWORK=off go build ./...` 单独验证，根模块编译通过不算数。
+
+---
+
 ## 基础设施：自建 CI（推自己的 Docker Hub）
 
 | 文件 | 改动 |
@@ -233,7 +258,7 @@ Content-Type: application/json
 
 ## 全部改动文件清单
 
-新增（A）5 个，修改（M）16 个，共 21 个：
+新增（A）6 个，修改（M）17 个，共 23 个：
 
 ```
 A  .github/workflows/deploy-main.yml                                     # 功能: CI
@@ -249,6 +274,8 @@ M  model/option.go                                                       # 功�
 M  plugins/tasks/sora/plugin.js                                          # 功能 4/7
 M  relay/channel/task/jsplugin/adaptor.go                                # 功能 7
 M  relay/channel/task/jsplugin/adaptor_test.go                           # 功能 7
+M  relaykit/relayconvert/internal/toolconv/encode.go                     # 功能 9
+A  relaykit/relayconvert/internal/toolconv/gemini_builtin_tools_test.go  # 功能 9
 M  relay/constant/relay_mode.go                                          # 功能 6
 M  relay/constant/relay_mode_test.go                                     # 功能 6
 M  relay/relay_task.go                                                   # 功能 1
@@ -286,6 +313,7 @@ M  web/src/i18n/locales/zh.json                                          # 功�
    grep -n "findVideoUrl\|credentialless" plugins/tasks/sora/plugin.js
    grep -n "len(schema.Enum) == 0" relay/channel/task/jsplugin/adaptor.go
    ls plugins/contrib/qwen-asr-filetrans/
+   grep -n "enableGeminiServerSideToolInvocations" relaykit/relayconvert/internal/toolconv/encode.go
    grep -rn "FishVoiceCloneHelper\|FishTTSHelper\|RelayModeFishTTS" --include="*.go" .
    # settleTaskBillingOnComplete 里 adaptor 调整必须在 PerCallBilling 早退之前
    grep -n "AdjustBillingOnComplete" -A 6 service/task_polling.go
@@ -295,7 +323,7 @@ M  web/src/i18n/locales/zh.json                                          # 功�
      ```bash
      go build ./relay/... ./controller/... ./model/... ./common/... ./service/... ./middleware/... ./setting/... ./pkg/... ./dto/... ./constant/... ./router/... ./plugins/...
      ```
-   - relaykit 独立编译：`cd relaykit && GOWORK=off go build ./...`
+   - relaykit 独立编译与测试：`cd relaykit && GOWORK=off go build ./... && GOWORK=off go test ./...`
    - 相关测试：`go test ./relay/constant/ ./service/ ./plugins/`
    - **Docker 完整构建**（唯一能验证前端语义的方式，因 `web/` 用 bun `catalog:` 依赖，npm/pnpm 装不了）：`docker build -t new-api:merge .`
 6. **推送**：`git push origin main`（自动触发 CI 出新镜像）。
