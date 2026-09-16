@@ -9,7 +9,6 @@
 - [功能一览](#功能一览)
 - [功能 1：/v1/videos（异步任务）执行渠道参数覆盖](#功能-1v1videos异步任务执行渠道参数覆盖)
 - [功能 3：API Key 掩码开关](#功能-3api-key-掩码开关)
-- [功能 4：sora 任务递归提取上游嵌套视频直链](#功能-4sora-任务递归提取上游嵌套视频直链)
 - [功能 7：任务插件枚举维度不拦提交](#功能-7任务插件枚举维度不拦提交)
 - [功能 8：阿里云百炼录音文件转写插件](#功能-8阿里云百炼录音文件转写插件)
 - [功能 9：Gemini 内置工具 + Function calling 自动开启开关](#功能-9gemini-内置工具--function-calling-自动开启开关)
@@ -28,7 +27,6 @@
 |---|------|------|------|
 | 1 | `/v1/videos` 等异步任务执行渠道参数覆盖 | 后端 | `applyTaskParamOverride` |
 | 3 | API Key 掩码开关（可手动关闭掩码） | 前后端 | `TokenKeyMaskEnabled` |
-| 4 | sora 任务递归提取上游嵌套视频直链 | 插件 | `findVideoUrl`（`plugins/tasks/sora/plugin.js`） |
 | 5 | 按次计费任务仍执行 adaptor 差额结算 | 后端 | `settleTaskBillingOnComplete` |
 | 6 | fish.audio 私有端点透传（声音克隆 / 原生 TTS） | 后端 | `FishVoiceCloneHelper`、`FishTTSHelper` |
 | 7 | 任务插件枚举维度不拦提交（兼容第三方中转） | 后端 + 插件 | `validateResolvedUsageValue` |
@@ -78,22 +76,6 @@
 | `web/src/i18n/locales/zh.json` / `en.json`（M） | 词条 `API Key Masking`、`When enabled, API keys are masked in the token list; turn off to show full keys` |
 
 **合并注意**：命名以 `Enabled` 结尾是有意的——`model/option.go` 靠该后缀走统一 bool 解析；`controller/option.go` 的 `GetOptions` 会过滤 `Token`/`Secret`/`Key` 结尾的敏感 key，本配置名不能改成这些后缀。合并后如官方新增了绕过 `buildMaskedTokenResponse` 直接返回 key 的接口，需补上开关判断。
-
----
-
-## 功能 4：sora 任务递归提取上游嵌套视频直链
-
-**背景**：sora（OpenAI Video 兼容）适配器在任务完成时不返回真实视频链接，而是让客户端回源到 `/v1/videos/{id}/content` 代理端点（假设上游就是真 OpenAI）。但很多中转上游根本没实现这个端点，真实视频直链（`.mp4`）藏在任务结果 JSON 的深层字段里（如 `data.video_url`、`output[].url`），导致视频打不开。
-
-**改动**（上游 #7076 把任务适配器换成沙箱 JS 插件后，逻辑已从 Go 移植到插件）：`plugins/tasks/sora/plugin.js` 的 `buildContentRequest` 先递归遍历任务体（`ctx.data`，map 按 key 排序保证结果确定）挖第一个「视频直链」——path 以 `.mp4/.mov/.webm/.mkv/.m4v/.m3u8/.avi` 结尾的 http(s) 链接，忽略签名 query，封面图 `.jpg/.png` 天然排除。挖到就用 `credentialless: true` 描述符回源（宿主允许任意 HTTP(S) host，且**不带渠道 key**，适配签名 CDN 直链）；挖不到才回退官方的 `/content` 端点。
-
-| 文件 | 改动 |
-|------|------|
-| `plugins/tasks/sora/plugin.js`（M） | 新增 `findVideoUrl` / `isVideoUrl`；`buildContentRequest` 优先返回直链；`meta.version` 随之 bump |
-
-**注意**：只对更新后新产生的任务生效，历史任务不回补。
-
-**合并注意**：官方插件文件是「整文件覆盖」型改动，合并后务必确认 `buildContentRequest` 里的直链分支还在（`grep findVideoUrl plugins/tasks/sora/plugin.js`）。
 
 ---
 
@@ -169,18 +151,16 @@ Content-Type: application/json
 
 问题在于**校验发生在归一化之前**。插件自己其实认得更宽的写法——doubao 的 `normalizeResolution` 能把 `1920x1080`、`2560x1440` 折算到档位，`extractUsageOnComplete` 也只挑白名单内的值上报——但请求体校验先一步把任务毙了。第三方中转普遍用官方清单之外的写法（如 seedance 2.x 的 `2k`、自定义 `WxH`），更新后全部下不了单。
 
-**改动**：
-
-1. `relay/channel/task/jsplugin/adaptor.go` 的 `validateResolvedUsageValue` 跳过**枚举型**维度。枚举只是定价维度，不是计费安全边界：命中不了就不参与倍率，走基础价，不会产生负费用。数值上限（`seconds` / `n`，即 `canonicalUsageLimit` 那条分支）仍然强校验，插件回报的计费事实也照旧走 `validatedUsageRatios` 严格校验，AGENTS.md 的计费安全不变量不受影响。
-2. `plugins/tasks/sora/plugin.js` 的 `extractUsage` 补上 `size` 白名单判断，与同文件 `extractUsageOnComplete` 对齐。上游这里是不对称的：完成时挑白名单、提交时原样上报，于是放开请求体校验后会改从 `EstimateBillingValidated` 二次报错。
+**改动**：`relay/channel/task/jsplugin/adaptor.go` 的 `validateResolvedUsageValue` 跳过**枚举型**维度。枚举只是定价维度，不是计费安全边界：命中不了就不参与倍率，走基础价，不会产生负费用。数值上限（`seconds` / `n`，即 `canonicalUsageLimit` 那条分支）仍然强校验，插件回报的计费事实也照旧走 `validatedUsageRatios` 严格校验，AGENTS.md 的计费安全不变量不受影响。
 
 | 文件 | 改动 |
 |------|------|
 | `relay/channel/task/jsplugin/adaptor.go`（M） | `validateResolvedUsageValue` 对 `len(schema.Enum) > 0` 的维度不做请求体校验 |
 | `relay/channel/task/jsplugin/adaptor_test.go`（M） | 官方 `TestTaskAdaptorBoundsNativeUsageBeforeQuotaCalculation` 的 `declared enum in resolved metadata` 断言的是旧契约，改成正向用例「未列出的枚举值放行」，数值上限用例原样保留 |
-| `plugins/tasks/sora/plugin.js`（M） | `extractUsage` 只上报白名单内的 `size` |
 
-**代价**：用了白名单外分辨率的请求，不再按该分辨率的倍率计价，退回基础价。要精确计价就把实际用的值加进对应插件的 `usageSchema.enum`（后台「任务插件」里传自定义插件覆盖内置的即可，不必重新出镜像）。
+**只解决了一半**：这一步放行的是**请求体**校验。插件 `extractUsage` 回报的计费事实仍然严格校验，所以插件自己若把白名单外的值原样上报，提交会改从 `EstimateBillingValidated` 报同一句错。内置 sora 插件就是这样（`extractUsage` 原样上报 `size`，而 `extractUsageOnComplete` 反倒挑白名单，上游这里是不对称的）——**OpenAI 类型渠道走 `/v1/videos` 且 `size` 不在 `720x1280` / `1280x720` / `1792x1024` / `1024x1792` 之内时仍会 400**。已实测确认。
+
+要解决的话两条路：给 sora 插件的 `extractUsage` 补白名单判断（后台传自定义插件覆盖内置即可，不必改镜像），或者把宿主的 `validatedUsageRatios` 也改成「丢弃未列出的枚举事实」而不是报错。本 fork 目前**两条都没做**——视频流量已迁到功能 10 的 `video-generate` 插件，`/v1/videos` 这条链路不再使用。
 
 **合并注意**：`relay/channel/task/jsplugin/adaptor.go` 是官方核心文件，合并后确认 `validateResolvedUsageValue` 里的 `len(schema.Enum) == 0` 判断还在。
 
@@ -294,7 +274,7 @@ Please enable tool_config.include_server_side_tool_invocations to use Built-in t
 
 ## 全部改动文件清单
 
-新增（A）8 个，修改（M）17 个，共 25 个：
+新增（A）9 个，修改（M）16 个，共 25 个：
 
 ```
 A  .github/workflows/deploy-main.yml                                     # 功能: CI
@@ -304,12 +284,12 @@ A  plugins/contrib/qwen-asr-filetrans/plugin.js                          # 功�
 A  plugins/contrib/video-generate/golden.json                           # 功能 10
 A  plugins/contrib/video-generate/plugin.js                             # 功能 10
 A  relay/fish_handler.go                                                 # 功能 6
+A  relay/fish_handler_test.go                                            # 功能 6
 M  common/constants.go                                                   # 功能 3
 M  controller/relay.go                                                   # 功能 6
 M  controller/token.go                                                   # 功能 3
 M  middleware/distributor.go                                             # 功能 6
 M  model/option.go                                                       # 功能 3
-M  plugins/tasks/sora/plugin.js                                          # 功能 4/7
 M  relay/channel/task/jsplugin/adaptor.go                                # 功能 7
 M  relay/channel/task/jsplugin/adaptor_test.go                           # 功能 7
 M  relaykit/relayconvert/internal/toolconv/encode.go                     # 功能 9
@@ -348,7 +328,6 @@ M  web/src/i18n/locales/zh.json                                          # 功�
 4. **确认二开标识都在**：
    ```bash
    grep -rn "applyTaskParamOverride\|TokenKeyMaskEnabled\|buildMaskedTokenResponse" --include="*.go" .
-   grep -n "findVideoUrl\|credentialless" plugins/tasks/sora/plugin.js
    grep -n "len(schema.Enum) == 0" relay/channel/task/jsplugin/adaptor.go
    ls plugins/contrib/qwen-asr-filetrans/
    grep -n "enableGeminiServerSideToolInvocations" relaykit/relayconvert/internal/toolconv/encode.go

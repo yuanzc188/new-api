@@ -7,7 +7,7 @@ export const meta = {
     en: "OpenAI Sora video generation (text-to-video, image-to-video, and remix)",
     zh: "OpenAI Sora 视频生成（文生视频、图生视频、remix）",
   },
-  version: "1.0.5",
+  version: "1.0.3",
   channelTypes: [55, 1], // OpenAI-type channels natively serve sora with the same wire format
   author: { name: "QuantumNous" },
   models: ["sora-2", "sora-2-pro"],
@@ -127,12 +127,7 @@ export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
   let seconds = Number(req.seconds || req.duration || 4);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = 4;
-  // 只上报白名单内的 size，与 extractUsageOnComplete 保持一致：第三方中转常用官方
-  // 四个尺寸之外的写法，原样上报会被 validatedUsageRatios 打回、整个任务提交失败。
-  const size = trimmed(req.size) || "720x1280";
-  const facts = { seconds: Math.min(seconds, 3600) };
-  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
-  return facts;
+  return { seconds: Math.min(seconds, 3600), size: req.size || "720x1280" };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
@@ -170,47 +165,8 @@ export function listArtifacts(task) {
   return task.status === "SUCCESS" ? [{ key: "video", type: "video" }] : [];
 }
 
-const VIDEO_URL_EXTENSIONS = [".mp4", ".mov", ".webm", ".mkv", ".m4v", ".m3u8", ".avi"];
-
-// Many OpenAI-compatible relays never implement /v1/videos/{id}/content and instead
-// embed the finished file as a direct link somewhere in the task payload. Walk the
-// whole task body (maps in sorted key order, so the pick is deterministic) and return
-// the first direct video link; cover images (.jpg/.png) never match.
-function findVideoUrl(node) {
-  if (typeof node === "string") return isVideoUrl(node) ? node : "";
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const found = findVideoUrl(item);
-      if (found) return found;
-    }
-    return "";
-  }
-  if (node && typeof node === "object") {
-    for (const key of Object.keys(node).sort()) {
-      const found = findVideoUrl(node[key]);
-      if (found) return found;
-    }
-  }
-  return "";
-}
-
-// Matches on the URL path only, so signed queries (?OSSAccessKeyId=...) still match.
-function isVideoUrl(value) {
-  if (!/^https?:\/\//i.test(value)) return false;
-  const authorityStart = value.indexOf("//") + 2;
-  const pathStart = value.indexOf("/", authorityStart);
-  if (pathStart === -1) return false;
-  const path = value.slice(pathStart).split("#")[0].split("?")[0].toLowerCase();
-  return VIDEO_URL_EXTENSIONS.some((extension) => path.endsWith(extension));
-}
-
 export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
-  const directUrl = findVideoUrl(ctx.data);
-  if (directUrl) {
-    // Signed third-party CDN links must not carry the channel key.
-    return { url: directUrl, method: ctx.clientRequest.method, credentialless: true };
-  }
   return {
     url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content",
     method: ctx.clientRequest.method,

@@ -65,11 +65,17 @@ func FishTTSHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErr
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
-	upstreamPath := fishTTSPath
-	if c.FullPath() == "/v1"+fishTTSTimestamped {
-		upstreamPath = fishTTSTimestamped
+	return fishPassthrough(c, info, fishTTSUpstreamPath(c.FullPath()), bytes.NewReader(upstreamBody), utf8.RuneCountInString(text))
+}
+
+// fishTTSUpstreamPath 把网关路由映射到 fish 的同名端点。参数是 gin 注册的路由模式
+// （c.FullPath()）而不是请求 URL——上游地址里不能掺用户输入。两个端点的网关路径
+// 与 fish 的路径完全一致，未知路由一律回落到普通合成。
+func fishTTSUpstreamPath(routePattern string) string {
+	if routePattern == fishTTSTimestamped {
+		return fishTTSTimestamped
 	}
-	return fishPassthrough(c, info, upstreamPath, bytes.NewReader(upstreamBody), utf8.RuneCountInString(text))
+	return fishTTSPath
 }
 
 // fishPassthrough 把 body 原样转发到 {base_url}+upstreamPath，响应（含 Content-Type）原样回写，
