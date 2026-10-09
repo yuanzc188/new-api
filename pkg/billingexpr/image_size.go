@@ -21,13 +21,17 @@ var imageSizePaths = []string{
 	"size",
 }
 
-// Pixel-count boundaries between resolution tiers. 1536x1024 stays 1K,
-// 2048x2048 and Gemini 2K 21:9 (3168x1344) stay 2K, 3840x2160 is 4K.
+// A WxH size reaches a tier when either its long edge or its pixel count
+// exceeds the lower tier. The long edge catches wide ratios whose pixel count
+// stays low: gpt-image 21:9 at 3840x1648 is only ~6.3MP but is the 4K option,
+// while Gemini 2K 21:9 (3168x1344) stays 2K.
 // ponytail: fixed thresholds; make them configurable if a provider's tiers stop fitting.
 const (
-	imageSize1KMaxPixels = 1536 * 1536
-	imageSize2KMaxPixels = 2560 * 2560
-	imageSizeMaxEdge     = 100_000
+	imageSize1KMaxLongEdge = 1600
+	imageSize2KMaxLongEdge = 3200
+	imageSize1KMaxPixels   = 1536 * 1536
+	imageSize2KMaxPixels   = 2560 * 2560
+	imageSizeMaxEdge       = 100_000
 )
 
 // ImageSizeTier normalizes the requested image resolution in a request body to
@@ -60,11 +64,11 @@ func normalizeImageSize(value string) string {
 	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 || width > imageSizeMaxEdge || height > imageSizeMaxEdge {
 		return ""
 	}
-	pixels := width * height
-	if pixels <= imageSize1KMaxPixels {
+	longEdge, pixels := max(width, height), width*height
+	if longEdge <= imageSize1KMaxLongEdge && pixels <= imageSize1KMaxPixels {
 		return "1K"
 	}
-	if pixels <= imageSize2KMaxPixels {
+	if longEdge <= imageSize2KMaxLongEdge && pixels <= imageSize2KMaxPixels {
 		return "2K"
 	}
 	return "4K"

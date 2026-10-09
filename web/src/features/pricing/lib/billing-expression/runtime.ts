@@ -88,6 +88,8 @@ const IMAGE_SIZE_PATHS = [
   'image_size',
   'size',
 ]
+const IMAGE_SIZE_1K_MAX_LONG_EDGE = 1600
+const IMAGE_SIZE_2K_MAX_LONG_EDGE = 3200
 const IMAGE_SIZE_1K_MAX_PIXELS = 1536 * 1536
 const IMAGE_SIZE_2K_MAX_PIXELS = 2560 * 2560
 const IMAGE_SIZE_MAX_EDGE = 100_000
@@ -121,9 +123,20 @@ function normalizeImageSize(raw: string): string {
   ) {
     return ''
   }
+  const longEdge = Math.max(width, height)
   const pixels = width * height
-  if (pixels <= IMAGE_SIZE_1K_MAX_PIXELS) return '1K'
-  if (pixels <= IMAGE_SIZE_2K_MAX_PIXELS) return '2K'
+  if (
+    longEdge <= IMAGE_SIZE_1K_MAX_LONG_EDGE &&
+    pixels <= IMAGE_SIZE_1K_MAX_PIXELS
+  ) {
+    return '1K'
+  }
+  if (
+    longEdge <= IMAGE_SIZE_2K_MAX_LONG_EDGE &&
+    pixels <= IMAGE_SIZE_2K_MAX_PIXELS
+  ) {
+    return '2K'
+  }
   return '4K'
 }
 
