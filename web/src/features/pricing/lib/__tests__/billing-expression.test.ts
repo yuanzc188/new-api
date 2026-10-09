@@ -224,6 +224,16 @@ describe('local billing expression evaluation', () => {
     ).toMatchObject({ status: 'success', cost: 2 })
   })
 
+  test('prices image_size at the default tier when no request is simulated', () => {
+    const expression =
+      '(image_size == "4K" ? tier("4K", fixed(0.151)) : tier("1K", fixed(0.067))) * image_count'
+    expect(evaluateBillingExpression(expression)).toMatchObject({
+      status: 'success',
+      matchedTier: '1K',
+      fixedPrice: 0.067,
+    })
+  })
+
   test.each([
     ['globalThis.process', 'unsupported'],
     ['tier("bad", p * 1e999)', 'invalid'],

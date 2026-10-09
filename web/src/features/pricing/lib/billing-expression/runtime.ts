@@ -308,14 +308,8 @@ class BillingRuntime {
         return { value }
       }
       if (node.name === 'image_size') {
-        if (!this.context.request) {
-          throw new BillingExpressionError({
-            code: 'missing_context',
-            detail: 'request body',
-            position: node.start,
-          })
-        }
-        return { value: imageSizeTier(this.context.request.body) }
+        // Like the backend, a missing body names no resolution: the default tier.
+        return { value: imageSizeTier(this.context.request?.body) }
       }
       const value = this.context.tokens?.[node.name]
       if (value === undefined) {

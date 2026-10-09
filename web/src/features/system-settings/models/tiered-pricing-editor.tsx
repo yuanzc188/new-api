@@ -317,7 +317,8 @@ function RawExprEditor({ exprString, onChange }: RawExprEditorProps) {
             {t('Variables')}: <code>len</code>, <code>p</code>, <code>c</code>,{' '}
             <code>cr</code>, <code>cc</code>, <code>cc1h</code>,{' '}
             <code>img</code>, <code>img_cr</code>, <code>img_o</code>,{' '}
-            <code>ai</code>, <code>ao</code>
+            <code>ai</code>, <code>ao</code>, <code>image_count</code>,{' '}
+            <code>image_size</code>
           </div>
           <div>
             {t('Functions')}: <code>tier(name, value)</code>,{' '}
