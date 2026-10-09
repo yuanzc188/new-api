@@ -46,11 +46,11 @@ func ResolveImageBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo
 		return input, err
 	}
 	body := map[string]any{"model": request.Model, "n": count, "size": request.Size, "quality": request.Quality}
-	// Third-party image APIs carry the resolution tier separately from an
-	// aspect-ratio size; JSON keeps it in Extra, multipart in the parsed form.
+	// Gemini-family image models carry the resolution tier in image_size,
+	// separately from size; multipart edits keep it in the parsed form.
 	var imageSize string
-	if raw, ok := request.Extra["image_size"]; ok {
-		_ = common.Unmarshal(raw, &imageSize)
+	if len(request.ImageSize) > 0 {
+		_ = common.Unmarshal(request.ImageSize, &imageSize)
 	} else if c != nil && c.Request != nil && c.Request.PostForm != nil {
 		imageSize = c.Request.PostForm.Get("image_size")
 	}

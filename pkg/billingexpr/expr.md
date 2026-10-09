@@ -162,8 +162,11 @@ OpenAI 已于 2026-05-12 下线 DALL·E 2/3；其校验、默认值和倍率保�
 表达式应以末尾分支作为默认档。读取位置依次为：
 `generationConfig.imageConfig.imageSize`、`generationConfig.image_config.image_size`、
 `generation_config.image_config.image_size`（Gemini 原生）、`extra_body.google.image_config.image_size`（Chat 转 Gemini）、
-`image_size`（第三方图片接口，`size` 常为比例如 `16:9`）、`size`（OpenAI Images）。
+`image_size`（Gemini 系图片模型走 OpenAI 格式时的分辨率，如 `1k`）、`size`（gpt-image 系列的 `宽x高`）。
 图片入口冻结的计费上下文保留 `size` 与字符串 `image_size`（JSON 或 multipart，最长 32 字符）。
+`image_size` 是 `ImageRequest` / `GeneralOpenAIRequest` 的显式字段，会转发给 OpenAI 兼容上游；
+Chat 转 Gemini 时映射为 `imageConfig.imageSize`（转大写，`extra_body.google.image_config.image_size` 优先），
+保证计费档位与上游实际生成的档位一致。
 按顺序取第一个能归一化出档位的值，因此比例形式的 `size` 不会遮住 `image_size`。
 `1K/2K/4K` 不区分大小写；`宽x高` 按像素数分档：≤ 1536×1536 为 1K，≤ 2560×2560 为 2K，其余为 4K；
 单边超过 100000 或非正数视为无法识别。预扣与结算读取同一份冻结请求体，结果一致。

@@ -129,6 +129,9 @@ type GeneralOpenAIRequest struct {
 	SkipSpecialTokens    json.RawMessage `json:"skip_special_tokens,omitempty"`
 	ContinueFinalMessage json.RawMessage `json:"continue_final_message,omitempty"`
 	CacheSalt            json.RawMessage `json:"cache_salt,omitempty"`
+	// Resolution tier for image-output models ("1K"/"2K"/"4K"); mapped to
+	// Gemini imageConfig.imageSize when converting to Gemini.
+	ImageSize json.RawMessage `json:"image_size,omitempty"`
 
 	// Internal conversion state; never serialized to an upstream protocol.
 	ReasoningConversion *ReasoningConversionState `json:"-"`

@@ -1,6 +1,7 @@
 package oaichat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -135,6 +136,10 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 				}
 			}
 		}
+	}
+
+	if err := applyTopLevelImageSize(&geminiRequest, textRequest.ImageSize); err != nil {
+		return nil, err
 	}
 
 	if err := sharedgemini.ApplyThinkingConfig(c, &geminiRequest, info, textRequest); err != nil {
@@ -376,4 +381,38 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 	}
 
 	return &geminiRequest, nil
+}
+
+// applyTopLevelImageSize maps the OpenAI-style top-level image_size onto
+// Gemini imageConfig.imageSize. extra_body.google.image_config.image_size
+// stays authoritative when both are present. Gemini only accepts upper-case
+// tiers, so "1k" is sent as "1K".
+func applyTopLevelImageSize(geminiRequest *dto.GeminiChatRequest, raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var imageSize string
+	if err := kitutil.Unmarshal(raw, &imageSize); err != nil {
+		return errors.New("image_size must be a string")
+	}
+	imageSize = strings.ToUpper(strings.TrimSpace(imageSize))
+	if imageSize == "" {
+		return nil
+	}
+	imageConfig := map[string]any{}
+	if len(geminiRequest.GenerationConfig.ImageConfig) > 0 {
+		if err := kitutil.Unmarshal(geminiRequest.GenerationConfig.ImageConfig, &imageConfig); err != nil {
+			return fmt.Errorf("failed to parse image_config: %w", err)
+		}
+	}
+	if _, exists := imageConfig["imageSize"]; exists {
+		return nil
+	}
+	imageConfig["imageSize"] = imageSize
+	encoded, err := kitutil.Marshal(imageConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal image_config: %w", err)
+	}
+	geminiRequest.GenerationConfig.ImageConfig = encoded
+	return nil
 }

@@ -159,20 +159,23 @@ func TestImageBillingRequestValidatesProviderCountWithoutOverriding(t *testing.T
 	}
 }
 
-// Third-party image APIs send an aspect ratio in size and the resolution tier in
-// image_size; the frozen billing context must keep image_size so image_size
-// pricing sees it, and a WxH size still prices without it.
+// Gemini-family image models send the resolution tier in image_size and
+// gpt-image models send WxH in size. Both must price the matching tier, and
+// image_size must still reach the upstream body so the charged tier is the
+// tier actually generated.
 func TestImageBillingRequestKeepsImageSize(t *testing.T) {
 	const expression = `(image_size == "4K" ? tier("4k", fixed(0.24)) : image_size == "2K" ? tier("2k", fixed(0.134)) : tier("1k", fixed(0.067))) * image_count`
 	for _, tc := range []struct {
-		body string
-		tier string
+		body     string
+		tier     string
+		upstream string
 	}{
-		{`{"model":"nano-banana","prompt":"x","size":"16:9","image_size":"4K"}`, "4k"},
-		{`{"model":"nano-banana","prompt":"x","image_size":"2k"}`, "2k"},
-		{`{"model":"gpt-image-2","prompt":"x","size":"2048x2048"}`, "2k"},
-		{`{"model":"nano-banana","prompt":"x","size":"16:9"}`, "1k"},
-		{`{"model":"nano-banana","prompt":"x","size":"16:9","image_size":{"tier":"4K"}}`, "1k"},
+		{`{"model":"gemini-3.1-flash-image","prompt":"x","image_size":"1k"}`, "1k", `"image_size":"1k"`},
+		{`{"model":"gemini-3.1-flash-image","prompt":"x","image_size":"4K","size":"16:9"}`, "4k", `"image_size":"4K"`},
+		{`{"model":"gpt-image-2","prompt":"x","size":"1024x1024"}`, "1k", `"size":"1024x1024"`},
+		{`{"model":"gpt-image-2","prompt":"x","size":"2048x2048"}`, "2k", `"size":"2048x2048"`},
+		{`{"model":"gpt-image-2","prompt":"x","size":"3840x2160"}`, "4k", `"size":"3840x2160"`},
+		{`{"model":"gemini-3.1-flash-image","prompt":"x","image_size":{"tier":"4K"}}`, "1k", `"image_size":{"tier":"4K"}`},
 	} {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(tc.body))
@@ -184,6 +187,9 @@ func TestImageBillingRequestKeepsImageSize(t *testing.T) {
 		_, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, input)
 		require.NoError(t, err)
 		assert.Equal(t, tc.tier, trace.MatchedTier, tc.body)
+		outbound, err := common.Marshal(request)
+		require.NoError(t, err)
+		assert.Contains(t, string(outbound), tc.upstream, tc.body)
 	}
 }
 

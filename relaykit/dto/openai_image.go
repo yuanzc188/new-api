@@ -45,6 +45,9 @@ type ImageRequest struct {
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
+	// Resolution tier ("1K"/"2K"/"4K") used by Gemini-family image models on
+	// OpenAI-compatible upstreams; gpt-image models use Size instead.
+	ImageSize json.RawMessage `json:"image_size,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra             map[string]json.RawMessage `json:"-"`
 	BillingParameters *ImageBillingParameters    `json:"-"`
