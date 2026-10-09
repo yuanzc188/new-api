@@ -419,5 +419,91 @@
         "conditionText": "Text-only requests"
       }
     ]
+  },
+  {
+    "name": "image size from gemini native body",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "generationConfig": {
+        "imageConfig": {
+          "imageSize": "2k"
+        }
+      }
+    },
+    "cost": 13,
+    "tier": "2k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      false
+    ]
+  },
+  {
+    "name": "image size from chat extra_body",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "extra_body": {
+        "google": {
+          "image_config": {
+            "image_size": "4K"
+          }
+        }
+      }
+    },
+    "cost": 24,
+    "tier": "4k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      false
+    ]
+  },
+  {
+    "name": "image size from openai WxH with quality rule",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "size": "3840x2160",
+      "quality": "high"
+    },
+    "cost": 48,
+    "tier": "4k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      true
+    ]
+  },
+  {
+    "name": "image size 2K pixel band",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "size": "3168x1344"
+    },
+    "cost": 13,
+    "tier": "2k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      false
+    ]
+  },
+  {
+    "name": "image size auto falls back",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "size": "auto"
+    },
+    "cost": 7,
+    "tier": "1k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      false
+    ]
   }
 ]

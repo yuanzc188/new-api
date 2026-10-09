@@ -79,6 +79,52 @@ export function readRequestPath(body: unknown, rawPath: string): unknown {
   return value ?? null
 }
 
+// Mirrors ImageSizeTier in pkg/billingexpr/image_size.go; keep both in sync.
+const IMAGE_SIZE_PATHS = [
+  'generationConfig.imageConfig.imageSize',
+  'generationConfig.image_config.image_size',
+  'generation_config.image_config.image_size',
+  'extra_body.google.image_config.image_size',
+  'size',
+]
+const IMAGE_SIZE_1K_MAX_PIXELS = 1536 * 1536
+const IMAGE_SIZE_2K_MAX_PIXELS = 2560 * 2560
+const IMAGE_SIZE_MAX_EDGE = 100_000
+
+/** Normalizes the requested resolution to "1K" / "2K" / "4K", or "" when absent. */
+export function imageSizeTier(body: unknown): string {
+  for (const path of IMAGE_SIZE_PATHS) {
+    const raw = readRequestPath(body, path)
+    if (raw === null) continue
+    const value = (
+      typeof raw === 'object' ? JSON.stringify(raw) : String(raw)
+    ).trim()
+    if (value) return normalizeImageSize(value)
+  }
+  return ''
+}
+
+function normalizeImageSize(raw: string): string {
+  const value = raw.toUpperCase()
+  if (value === '1K' || value === '2K' || value === '4K') return value
+  const match = /^\s*(\d+)\s*X\s*(\d+)\s*$/.exec(value)
+  if (!match) return ''
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (
+    width <= 0 ||
+    height <= 0 ||
+    width > IMAGE_SIZE_MAX_EDGE ||
+    height > IMAGE_SIZE_MAX_EDGE
+  ) {
+    return ''
+  }
+  const pixels = width * height
+  if (pixels <= IMAGE_SIZE_1K_MAX_PIXELS) return '1K'
+  if (pixels <= IMAGE_SIZE_2K_MAX_PIXELS) return '2K'
+  return '4K'
+}
+
 /** Match fmt.Sprint for JSON values passed to the backend's has() helper. */
 function billingString(value: unknown, depth = 0): string {
   if (depth > 128) {
@@ -258,6 +304,16 @@ class BillingRuntime {
           })
         }
         return { value }
+      }
+      if (node.name === 'image_size') {
+        if (!this.context.request) {
+          throw new BillingExpressionError({
+            code: 'missing_context',
+            detail: 'request body',
+            position: node.start,
+          })
+        }
+        return { value: imageSizeTier(this.context.request.body) }
       }
       const value = this.context.tokens?.[node.name]
       if (value === undefined) {

@@ -67,8 +67,14 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		trace.ImageCount = &imageCount
 	}
 
+	imageSize := ""
+	if usedVars["image_size"] {
+		imageSize = ImageSizeTier(request.Body)
+	}
+
 	env := map[string]any{
 		"image_count": float64(imageCount),
+		"image_size":  imageSize,
 		"p":           params.P,
 		"c":           params.C,
 		"len":         params.Len,

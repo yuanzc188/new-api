@@ -101,7 +101,7 @@ func usesRequestProbe(node ast.Node) bool {
 			return false
 		}
 		switch identifier.Value {
-		case "param", "header", "hour", "minute", "weekday", "month", "day":
+		case "param", "header", "image_size", "hour", "minute", "weekday", "month", "day":
 			return true
 		default:
 			return false
@@ -126,6 +126,7 @@ var (
 // compileEnvPrototypeV1 is the v1 type-checking prototype used at compile time.
 var compileEnvPrototypeV1 = map[string]any{
 	"image_count": float64(1),
+	"image_size":  "",
 	"p":           float64(0),
 	"c":           float64(0),
 	"len":         float64(0),

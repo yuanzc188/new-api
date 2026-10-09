@@ -41,6 +41,36 @@ func TestFixedPriceBranches(t *testing.T) {
 	}
 }
 
+func TestImageSizeTierPricing(t *testing.T) {
+	const expression = `(image_size == "4K" ? tier("4k", fixed(0.24)) : image_size == "2K" ? tier("2k", fixed(0.134)) : tier("1k", fixed(0.067))) * image_count * (image_size == "4K" && param("quality") == "high" ? 2 : 1)`
+	for _, tc := range []struct {
+		name string
+		body string
+		tier string
+		cost float64
+	}{
+		{"gemini native", `{"generationConfig":{"imageConfig":{"imageSize":"4K"}}}`, "4k", 0.24},
+		{"gemini native snake", `{"generation_config":{"image_config":{"image_size":"2k"}}}`, "2k", 0.134},
+		{"chat extra_body", `{"extra_body":{"google":{"image_config":{"image_size":"2K"}}}}`, "2k", 0.134},
+		{"openai 1536x1024", `{"size":"1536x1024"}`, "1k", 0.067},
+		{"openai 2048x2048", `{"size":"2048x2048"}`, "2k", 0.134},
+		{"gemini 2K 21:9", `{"size":"3168x1344"}`, "2k", 0.134},
+		{"openai 3840x2160 high", `{"size":"3840x2160","quality":"high"}`, "4k", 0.48},
+		{"size label", `{"size":"4k"}`, "4k", 0.24},
+		{"auto falls back", `{"size":"auto"}`, "1k", 0.067},
+		{"garbage falls back", `{"size":"-5x99999999999"}`, "1k", 0.067},
+		{"missing falls back", `{}`, "1k", 0.067},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			count := 2
+			cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Body: []byte(tc.body), ImageCount: &count})
+			require.NoError(t, err)
+			assert.Equal(t, tc.tier, trace.MatchedTier)
+			assert.InDelta(t, tc.cost*2*1_000_000, cost, 1e-6)
+		})
+	}
+}
+
 func TestFixedPriceRejectsInvalidLeavesIncludingUnselectedBranches(t *testing.T) {
 	for _, expression := range []string{
 		`true ? tier("ok", p) : tier("bad", fixed(-0.01))`,

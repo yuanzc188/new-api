@@ -30,7 +30,11 @@ export const TOKEN_VARIABLES = [
   'ao',
 ] as const
 export type TokenVariable = (typeof TOKEN_VARIABLES)[number]
-export const BILLING_VARIABLES = [...TOKEN_VARIABLES, 'image_count'] as const
+export const BILLING_VARIABLES = [
+  ...TOKEN_VARIABLES,
+  'image_count',
+  'image_size',
+] as const
 export type BillingVariable = (typeof BILLING_VARIABLES)[number]
 export const TIME_FUNCTIONS = [
   'hour',

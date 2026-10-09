@@ -142,7 +142,8 @@ function tokenTier(
     if (
       input.kind === 'variable' &&
       input.name !== 'len' &&
-      input.name !== 'image_count'
+      input.name !== 'image_count' &&
+      input.name !== 'image_size'
     ) {
       variable = input.name
     } else {

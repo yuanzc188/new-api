@@ -156,6 +156,26 @@ OpenAI 已于 2026-05-12 下线 DALL·E 2/3；其校验、默认值和倍率保�
 （Qwen-Image-3.0 为 `usage.output_image_count`）或按各 `choices[].message.content[]` / `results[]`
 中的图片载荷数结算，任务消费日志同样记录 `image_count`。
 
+### Image Size
+
+`image_size` 是从请求体归一化出的分辨率档位字符串：`"1K"`、`"2K"`、`"4K"`，未指定或无法识别（如 `auto`）时为 `""`，
+表达式应以末尾分支作为默认档。按以下顺序取第一个非空值：
+`generationConfig.imageConfig.imageSize`、`generationConfig.image_config.image_size`、
+`generation_config.image_config.image_size`（Gemini 原生）、`extra_body.google.image_config.image_size`（Chat 转 Gemini）、
+`size`（OpenAI Images，图片入口冻结的计费上下文保留该字段）。
+`1K/2K/4K` 不区分大小写；`宽x高` 按像素数分档：≤ 1536×1536 为 1K，≤ 2560×2560 为 2K，其余为 4K；
+单边超过 100000 或非正数视为无法识别。预扣与结算读取同一份冻结请求体，结果一致。
+`image_size` 属于请求探针，可用于条件分支和 `|||` 请求倍率规则，与 `fixed()`、`image_count` 组合：
+
+```
+(image_size == "4K" ? tier("4k", fixed(0.24))
+  : image_size == "2K" ? tier("2k", fixed(0.134))
+  : tier("1k", fixed(0.067))) * image_count
+```
+
+前端模拟器的 `imageSizeTier`（`web/src/features/pricing/lib/billing-expression/runtime.ts`）与后端
+`ImageSizeTier` 必须保持一致，共享用例位于 `testdata/frontend_simulation.json`。
+
 > **注意：** 自动扣除针对 GPT/OpenAI 格式的 API（prompt_tokens 包含子类别）。Claude 格式的 API 不重复扣除缓存；未独立计价的缓存读取加回输入。系统根据上游返回格式自动处理。
 
 ### Built-in Functions
