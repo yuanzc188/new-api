@@ -35,6 +35,8 @@ export type TokenTierCondition = {
 export type TokenTier = {
   conditionText?: string
   imageCount?: boolean
+  /** Resolution tier matched by `image_size == "4K"`; "" marks the default tier. */
+  imageSize?: string
   billingUnit?: 'token' | 'request'
   fixedPrice?: number
   label: string
@@ -78,6 +80,25 @@ function tokenConditions(node: ExpressionNode): TokenTierCondition[] | null {
     })
   }
   return conditions
+}
+
+/** Reads `image_size == "4K"` (either operand order) and returns "4K". */
+function imageSizeCondition(node: ExpressionNode): string | null {
+  if (node.kind !== 'binary' || node.operator !== '==') return null
+  for (const [variable, literal] of [
+    [node.left, node.right],
+    [node.right, node.left],
+  ]) {
+    if (
+      variable.kind === 'variable' &&
+      variable.name === 'image_size' &&
+      literal.kind === 'literal' &&
+      typeof literal.value === 'string'
+    ) {
+      return literal.value
+    }
+  }
+  return null
 }
 
 function nonnegativePriceLiteral(node: ExpressionNode): number | null {
@@ -231,16 +252,34 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
   }
   const tiers: TokenTier[] = []
   let remaining = node
+  let byImageSize = false
   while (remaining.kind === 'conditional') {
-    const conditions = tokenConditions(remaining.condition)
+    const imageSize = imageSizeCondition(remaining.condition)
+    const conditions =
+      imageSize === null ? tokenConditions(remaining.condition) : []
     if (!conditions) return null
     const tier = tokenTier(remaining.yes, conditions)
     if (!tier) return null
-    tiers.push(tier)
+    if (imageSize === null) {
+      tiers.push(tier)
+    } else {
+      byImageSize = true
+      tiers.push({
+        ...tier,
+        imageSize,
+        conditionText: `image_size == ${JSON.stringify(imageSize)}`,
+      })
+    }
     remaining = remaining.no
   }
   const fallback = tokenTier(remaining, [])
   if (!fallback) return null
+  if (byImageSize) {
+    return [
+      ...tiers,
+      { ...fallback, imageSize: '', conditionText: 'Other cases' },
+    ]
+  }
   return [...tiers, fallback]
 }
 

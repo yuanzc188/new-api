@@ -525,6 +525,37 @@ export function getDynamicPricingSummary(
         ...getDynamicPriceEntries(requestTier, options),
       ]
     }
+    // image_size tiers each carry a per-image price; list every resolution
+    // instead of only the first tier.
+    const resolutionTiers = summaryTiers.flatMap((item) =>
+      !isTaskPricingTier(item) &&
+      typeof item.imageSize === 'string' &&
+      item.billingUnit === 'request' &&
+      typeof item.fixedPrice === 'number'
+        ? [
+            {
+              label: item.label,
+              fixedPrice: item.fixedPrice,
+              imageCount: Boolean(item.imageCount),
+            },
+          ]
+        : []
+    )
+    if (
+      summaryTiers.length > 1 &&
+      resolutionTiers.length === summaryTiers.length
+    ) {
+      entries = resolutionTiers.map((item) => ({
+        key: `imageSize:${item.label}`,
+        field: `imageSize:${item.label}`,
+        label: item.label,
+        shortLabel: item.label,
+        labelKind: 'schema',
+        value: item.fixedPrice,
+        formatted: formatTaskUsageUnitPrice(item.fixedPrice, options),
+        unit: item.imageCount ? 'image' : 'request',
+      }))
+    }
   }
   if (isTaskUsage) {
     const priceRanges = new Map<string, { min: number; max: number }>()

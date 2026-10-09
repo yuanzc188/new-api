@@ -290,6 +290,7 @@ function mapTokenTier(
   return {
     label: tier.label,
     ...(tier.imageCount ? { imageCount: true } : {}),
+    ...(tier.imageSize !== undefined ? { imageSize: tier.imageSize } : {}),
     conditions: tier.conditions,
     ...(tier.billingUnit === 'request'
       ? { billingUnit: tier.billingUnit, fixedPrice: tier.fixedPrice }

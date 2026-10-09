@@ -92,6 +92,33 @@ describe('expression price summaries', () => {
     expect(free?.primaryEntries).toHaveLength(1)
     expect(free?.primaryEntries[0].value).toBe(0)
   })
+  test('lists every image_size tier price instead of a special expression', () => {
+    const summary = getDynamicPricingSummary(
+      pricingModel({
+        billing_mode: 'tiered_expr',
+        billing_expr:
+          '(image_size == "4K" ? tier("4K", fixed(0.17)) : image_size == "2K" ? tier("2K", fixed(0.15)) : tier("1K", fixed(0.14))) * image_count',
+      }),
+      { tokenUnit: 'M' }
+    )
+    expect(summary?.isSpecialExpression).toBe(false)
+    expect(
+      summary?.primaryEntries.map((entry) => [
+        entry.shortLabel,
+        entry.value,
+        entry.unit,
+      ])
+    ).toEqual([
+      ['4K', 0.17, 'image'],
+      ['2K', 0.15, 'image'],
+      ['1K', 0.14, 'image'],
+    ])
+    expect(summary?.tiers.map((entry) => entry.conditionText)).toEqual([
+      'image_size == "4K"',
+      'image_size == "2K"',
+      'Other cases',
+    ])
+  })
   const timeExpression =
     'weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && ((hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12) || (hour("Asia/Shanghai") >= 14 && hour("Asia/Shanghai") < 18)) ? tier("peak", p * 3 + cr * 0.1 + c * 9) : tier("off_peak", p * 1.5 + cr * 0.05 + c * 4.5)'
 
