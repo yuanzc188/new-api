@@ -67,6 +67,7 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		require.NoError(t, writer.WriteField("model", "gpt-image-1"))
 		require.NoError(t, writer.WriteField("prompt", "edit this image"))
 		require.NoError(t, writer.WriteField("stream", streamValue))
+		require.NoError(t, writer.WriteField("image_size", "2K"))
 		if withImage {
 			part, err := writer.CreateFormFile("image", "input.png")
 			require.NoError(t, err)
@@ -104,6 +105,7 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		require.Equal(t, 1, *billing.ImageCount)
 		require.NotContains(t, string(billing.Body), "fake image")
 		require.NotContains(t, string(billing.Body), "edit this image")
+		require.Equal(t, "2K", billingexpr.ImageSizeTier(billing.Body))
 	})
 
 	t.Run("invalid stream value is rejected", func(t *testing.T) {
@@ -154,6 +156,34 @@ func TestImageBillingRequestValidatesProviderCountWithoutOverriding(t *testing.T
 		cost, _, err := billingexpr.RunExprWithRequest(`tier("image", fixed(0.04)) * image_count`, billingexpr.TokenParams{}, input)
 		require.NoError(t, err)
 		require.Equal(t, float64(tc.count)*40000, cost)
+	}
+}
+
+// Third-party image APIs send an aspect ratio in size and the resolution tier in
+// image_size; the frozen billing context must keep image_size so image_size
+// pricing sees it, and a WxH size still prices without it.
+func TestImageBillingRequestKeepsImageSize(t *testing.T) {
+	const expression = `(image_size == "4K" ? tier("4k", fixed(0.24)) : image_size == "2K" ? tier("2k", fixed(0.134)) : tier("1k", fixed(0.067))) * image_count`
+	for _, tc := range []struct {
+		body string
+		tier string
+	}{
+		{`{"model":"nano-banana","prompt":"x","size":"16:9","image_size":"4K"}`, "4k"},
+		{`{"model":"nano-banana","prompt":"x","image_size":"2k"}`, "2k"},
+		{`{"model":"gpt-image-2","prompt":"x","size":"2048x2048"}`, "2k"},
+		{`{"model":"nano-banana","prompt":"x","size":"16:9"}`, "1k"},
+		{`{"model":"nano-banana","prompt":"x","size":"16:9","image_size":{"tier":"4K"}}`, "1k"},
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(tc.body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+		require.NoError(t, err, tc.body)
+		input, err := ResolveImageBillingRequestInput(c, &relaycommon.RelayInfo{Request: request}, billingexpr.RequestInput{})
+		require.NoError(t, err)
+		_, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, input)
+		require.NoError(t, err)
+		assert.Equal(t, tc.tier, trace.MatchedTier, tc.body)
 	}
 }
 

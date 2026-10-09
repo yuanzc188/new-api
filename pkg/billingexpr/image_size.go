@@ -9,12 +9,15 @@ import (
 
 // imageSizePaths lists where each entrance carries the requested resolution:
 // Gemini native generateContent (camel and snake), OpenAI chat converted to
-// Gemini, and the OpenAI Images size. The first non-empty value wins.
+// Gemini, the third-party image_size field and the OpenAI Images size. The
+// first value that names a tier wins, so an aspect-ratio size such as "16:9"
+// does not hide an image_size of "4K".
 var imageSizePaths = []string{
 	"generationConfig.imageConfig.imageSize",
 	"generationConfig.image_config.image_size",
 	"generation_config.image_config.image_size",
 	"extra_body.google.image_config.image_size",
+	"image_size",
 	"size",
 }
 
@@ -35,9 +38,8 @@ func ImageSizeTier(body []byte) string {
 		return ""
 	}
 	for _, path := range imageSizePaths {
-		value := strings.TrimSpace(gjson.GetBytes(body, path).String())
-		if value != "" {
-			return normalizeImageSize(value)
+		if tier := normalizeImageSize(strings.TrimSpace(gjson.GetBytes(body, path).String())); tier != "" {
+			return tier
 		}
 	}
 	return ""

@@ -85,6 +85,7 @@ const IMAGE_SIZE_PATHS = [
   'generationConfig.image_config.image_size',
   'generation_config.image_config.image_size',
   'extra_body.google.image_config.image_size',
+  'image_size',
   'size',
 ]
 const IMAGE_SIZE_1K_MAX_PIXELS = 1536 * 1536
@@ -99,7 +100,8 @@ export function imageSizeTier(body: unknown): string {
     const value = (
       typeof raw === 'object' ? JSON.stringify(raw) : String(raw)
     ).trim()
-    if (value) return normalizeImageSize(value)
+    const tier = normalizeImageSize(value)
+    if (tier) return tier
   }
   return ''
 }

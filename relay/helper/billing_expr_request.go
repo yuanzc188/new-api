@@ -46,6 +46,18 @@ func ResolveImageBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo
 		return input, err
 	}
 	body := map[string]any{"model": request.Model, "n": count, "size": request.Size, "quality": request.Quality}
+	// Third-party image APIs carry the resolution tier separately from an
+	// aspect-ratio size; JSON keeps it in Extra, multipart in the parsed form.
+	var imageSize string
+	if raw, ok := request.Extra["image_size"]; ok {
+		_ = common.Unmarshal(raw, &imageSize)
+	} else if c != nil && c.Request != nil && c.Request.PostForm != nil {
+		imageSize = c.Request.PostForm.Get("image_size")
+	}
+	// Tier labels and WxH sizes are short; anything longer is not billable data.
+	if imageSize != "" && len(imageSize) <= 32 {
+		body["image_size"] = imageSize
+	}
 	if request.BillingParameters != nil {
 		body["parameters"] = request.BillingParameters
 	}

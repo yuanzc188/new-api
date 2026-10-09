@@ -505,5 +505,21 @@
     "matched": [
       false
     ]
+  },
+  {
+    "name": "image size aspect-ratio size defers to image_size",
+    "expression": "(image_size == \"4K\" ? tier(\"4k\", 24) : image_size == \"2K\" ? tier(\"2k\", 13) : tier(\"1k\", 7)) * (image_size == \"4K\" && param(\"quality\") == \"high\" ? 2 : 1)",
+    "body": {
+      "size": "16:9",
+      "image_size": "4k"
+    },
+    "cost": 24,
+    "tier": "4k",
+    "multipliers": [
+      2
+    ],
+    "matched": [
+      false
+    ]
   }
 ]
